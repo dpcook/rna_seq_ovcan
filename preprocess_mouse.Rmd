@@ -1,0 +1,193 @@
+---
+title: "OvCAN - Mouse RNA-seq processing"
+output: html_notebook
+---
+
+# Goal
+Get gene level counts for each sample, perform some high-level summary of the samples (PCA/clustering)
+
+# Dependencies
+```{r}
+library(tximport)
+library(tidyverse)
+library(Hmisc)
+library(factoextra)
+library(biomaRt)
+library(pheatmap)
+```
+
+# Get transcript-to-gene annotation
+```{r}
+mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL",
+  dataset = "mmusculus_gene_ensembl",
+  host = 'ensembl.org')
+t2g <- biomaRt::getBM(attributes = c("ensembl_transcript_id", "ensembl_gene_id",
+    "external_gene_name"), mart = mart)
+t2g <- dplyr::rename(t2g, target_id = ensembl_transcript_id,
+  ens_gene = ensembl_gene_id, ext_gene = external_gene_name)
+t2g <- unique(t2g[,c("target_id", "ext_gene")])
+```
+
+# Load the data
+```{r}
+sample_id <- dir("../data/mouse")
+sample_id
+```
+
+```{r}
+kal_dirs <- file.path("../data/mouse", sample_id)
+kal_dirs
+```
+
+```{r}
+annotation <- read.csv("../data/mouse_sample_annotation_cleaned_model_name.csv")
+annotation$path <- kal_dirs[match(annotation$Sample.code, sample_id)]
+```
+
+```{r}
+files <- file.path(annotation$path, "abundance.h5")
+names(files) <- annotation$Sample.code
+```
+
+## Import with tximport
+
+```{r}
+txi.kallisto <- tximport(files, type = "kallisto", tx2gene = t2g,
+                         ignoreTxVersion = T)
+```
+
+Abundance = TPM provided from Kallisto
+
+Raw counts here are not appropriate for downstream analysis. The reported counts in txi are simply the sum of transcript-level counts. This does not correct for transcript/isoform length. To use gene-level counts, an offset based on each gene's average isoform length needs to be applied. Moving into DESeq2 with DESeqDataSetFromTximport does this. 
+
+For the more global analysis, the TPM values from Kallisto are fine.
+
+```{r}
+tpm_mat <- txi.kallisto$abundance[2:nrow(txi.kallisto$abundance),] #the first row seems to be the sum of the transcripts missing from tx2gene
+tpm_mat <- tpm_mat[rowSums(tpm_mat) != 0,] #remove genes with no detection in any sample'
+```
+
+```{r}
+colnames(tpm_mat)
+```
+
+
+## Save point
+```{r}
+saveRDS(txi.kallisto, file="../output/txi_mouse.rds")
+write.csv(tpm_mat, file="../output/tpm_matrix_mouse.csv", quote=F)
+```
+
+# High-level comparisons
+```{r}
+tpm_mat_log <- log1p(tpm_mat)
+```
+
+## Spearman correlation
+```{r}
+dat_cor <- cor(tpm_mat_log, method="spearman")
+```
+
+Set up sample annotation
+```{r}
+col_annotation <- data.frame(Tissue = annotation$Tissue.type,
+                             Model = annotation$Model)
+rownames(col_annotation) <- annotation$Sample.code
+```
+
+
+```{r}
+pheatmap::pheatmap(dat_cor,
+                   color = viridisLite::mako(100),
+                   annotation_col = col_annotation,
+                   border_color = "black",
+                   breaks = seq(0.85, 1, length.out=101),
+                   show_colnames = F,
+                   clustering_method = "ward.D2",
+                   fontsize=5,
+                   filename="../figs/spearman_cor_heatmap_mouse.png",
+                   width=10, height=10)
+```
+
+## Histological subtype markers
+
+Marker list from Yemen:
+```{r}
+markers <- c("Pax8", "Krt7", "Muc1", "Trp53", "Wt1", #HGSC
+             "Pax2", #Low grade
+             "Hnf1b", "Napsa", "Cth", "Arid1a", #Clear cell
+             "Smarca4", "Smarca2", "Arid1b", "Smarcb1", #SCCOHT/dediff
+             "Tff3") #Mucinous
+```
+
+TODO: Calculate average per model
+
+```{r}
+cell_lines <- filter(annotation, Tissue.type == "cell line") %>%
+  pull(Sample.code)
+tmp <- t(scale(t(tpm_mat_log[markers,cell_lines])))
+colnames(tmp) <- annotation$SampleID[match(colnames(tmp), annotation$Sample.code)]
+
+pheatmap(tmp,
+         color = colorRampPalette(rev(RColorBrewer::brewer.pal(7, "RdBu")))(100),
+         border_color = "black",
+         breaks = seq(-2, 2, length.out=101),
+         cluster_rows=F, 
+         cluster_cols=T,
+         angle_col = 45,
+         file="../figs/ovca_markers.png",
+         width=12, height=4.5)
+```
+
+
+## PCA
+```{r}
+mat_log_pca <- tpm_mat_log[matrixStats::rowVars(tpm_mat_log) != 0,]
+pca_res <- prcomp(t(mat_log_pca)[annotation$Sample,], scale=T) # get samples ordered same as annotation table
+```
+
+```{r}
+fviz_eig(pca_res) + ylab("Percentage variance explained") + 
+  theme(axis.text = element_text(size=10, color="black"),
+        axis.title = element_text(size=12))
+```
+
+```{r}
+rownames(pca_res$x) <- make.unique(annotation$Model)
+```
+
+```{r}
+fviz_pca_ind(pca_res, axes=c(1,2),
+             repel = TRUE,
+             habillage = annotation$PI,
+             max.overlaps=100)
+```
+## tSNE
+```{r}
+ovcan_tsne <- Rtsne::Rtsne(pca_res$x[,1:10], perplexity=20) #keep 3*perp < nrow(x)
+```
+
+### Plotting
+```{r}
+plot_dat <- annotation
+plot_dat$tSNE1 <- ovcan_tsne$Y[,1]
+plot_dat$tSNE2 <- ovcan_tsne$Y[,2]
+plot_dat$PC1 <- pca_res$x[,1]
+plot_dat$PC2 <- pca_res$x[,2]
+plot_dat$PC3 <- pca_res$x[,3]
+```
+
+```{r}
+tsne_plot <- ggplot(plot_dat, aes(x=tSNE1, y= tSNE2, label=Model)) + 
+  geom_point(aes(color=PI)) +
+  geom_text_repel(max.overlaps=100, size=3) +
+  theme_classic() +
+  theme(axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+tsne_plot
+```
+
+```{r}
+ggsave(tsne_plot, filename="../figs/sample_tsne.pdf",
+       width=12, height=9)
+```

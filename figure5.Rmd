@@ -1,0 +1,388 @@
+---
+title: "Figure 4"
+output: html_notebook
+---
+
+# Dependencies
+```{r}
+library(tidyverse)
+library(tximport)
+library(DESeq2)
+library(matrixStats)
+library(topGO)
+library(ggrepel)
+library(cowplot)
+library(ggrastr)
+options(ggrastr.default.dpi=300)
+```
+
+# Load the data
+```{r}
+txi <- readRDS("../../../output/txi_mouse.rds")
+tpm <- read.csv("../../../output/tpm_matrix_mouse.csv", row.names=1)
+tpm <- log1p(as.matrix(tpm))
+tpm <- tpm[matrixStats::rowVars(tpm) != 0,]
+```
+
+```{r}
+annotations <- read.csv("../../../data/mouse_sample_annotation_cleaned_model_name.csv")
+#annotations$Sample.code <- gsub("-", ".", annotations$Sample.code)
+
+rownames(annotations) <- annotations$Sample.code
+```
+
+## Cell Line DESeq setup
+```{r}
+cell_lines <- annotations %>% 
+  filter(Tissue.type == "cell line")
+```
+
+```{r}
+dds <- DESeqDataSetFromTximport(txi, annotations, ~Model)
+```
+
+```{r}
+dds <- dds[,cell_lines$Sample.code] # Only cell lines 
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- dds[which(rownames(dds)!=""),] # Remove unannotated gene entry in matrix
+```
+
+```{r}
+dds$Model <- factor(dds$Model)
+```
+
+# Figure 4a - Schematic
+
+# Figure 4b - PCA of STOSE and ID8 ascites
+## STOSE
+```{r}
+dds_stose <- dds[,paste0("BV-", 54:61)]
+keep <- rowSums(counts(dds_stose)) >= 10
+dds_stose <- dds_stose[keep,]
+dds_stose <- dds_stose[which(rownames(dds_stose)!=""),]
+dds_stose$Model <- factor(dds_stose$Model)
+
+norm_counts <- vst(dds_stose, blind=FALSE) 
+```
+
+### PCA
+Top 2k variable genes only
+```{r}
+var_genes <- rownames(assay(norm_counts))[order(rowSds(assay(norm_counts)),
+                                        decreasing=T)[1:2000]]
+```
+
+```{r}
+pca_res <- prcomp(t(assay(norm_counts)[var_genes,]), scale=F, center=T) 
+```
+
+```{r}
+df <- data.frame(PC1 = pca_res$x[,1],
+                 PC2 = pca_res$x[,2],
+                 PC3 = pca_res$x[,3],
+                 PC4 = pca_res$x[,4],
+                 Model = norm_counts$Model,
+                 SampleID = norm_counts$SampleID)
+```
+
+```{r}
+df_summary <- df %>% group_by(Model) %>%
+  summarise_at(c("PC1", "PC2", "PC3", "PC4"), mean, na.rm = TRUE)
+```
+
+```{r}
+stose_pca_plot <- ggplot(df_summary, aes(x=PC1, y=PC2, label=Model)) +
+  geom_point(data=df, shape=16, size=3, aes(color=Model)) +
+  geom_point(shape=21,size=6, color="black", aes(fill=Model), alpha=0.5) +
+  geom_text_repel(max.overlaps=100, size=4,
+                  segment.size=0.25,
+                  min.segment.length = 0,
+                  force=3,
+                  direction = "both") +
+  ggtitle("STOSE Ascites lines") +
+  #scale_x_continuous(limits=c(-80, 80)) +
+  #scale_y_continuous(limits=c(-75, 40)) +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+```
+
+### PC1 loadings
+```{r}
+loadings <- pca_res$rotation
+df <- data.frame(Gene = rownames(loadings),
+                 PC1 = loadings[,1])
+df <- arrange(df, desc(PC1))
+df$Rank <- 1:nrow(df)
+```
+
+```{r}
+up_labels <- c("Col1a2", "Col8a1", "Inhba", "Lgals3", "Sema4f", "Krt19", 
+               "Anxa8", "Wnt10b")
+down_labels <- c("Cxcl12", "Lrrn4", "Gas7", "Wnt4", "Gas1", "Sox9", "Tgm2",
+                 "Tnc", "Fgf2")
+```
+
+```{r}
+df$Up_Label <- ""
+df$Up_Label[match(up_labels, df$Gene)] <- up_labels
+
+df$Down_Label <- ""
+df$Down_Label[match(down_labels, df$Gene)] <- down_labels
+```
+
+```{r}
+bluered <- rev(RColorBrewer::brewer.pal(9, "RdBu"))
+```
+
+```{r}
+stose_loading_plot <- ggplot(df, aes(x=Rank, y=PC1)) +
+  rasterise(geom_point(size=0.15, colour="grey13"), dpi=600) +
+  geom_text_repel(aes(label=Up_Label),
+                  max.overlaps = Inf,
+                  nudge_x =750,
+                  direction = "y",
+                  force=0.5, 
+                  color=bluered[8]) +
+  geom_text_repel(aes(label=Down_Label),
+                  max.overlaps = Inf,
+                  nudge_x = -750,
+                  direction = "y",
+                  force=0.5,
+                  color=bluered[2]) +
+  scale_x_continuous(limits=c(0,2000)) +
+  ylab("PC1 Loading") +
+  theme_classic() +
+  theme(axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+```
+
+
+### GO Terms of Top Loaded genes
+```{r}
+go_up <- pcaExplorer::topGOtable(df %>%
+                                   filter(PC1 > (mean(PC1)+sd(PC1))) %>%
+                                   pull(Gene),
+                                  rownames(dds),
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+go_up$Term <- factor(Hmisc::capitalize(go_up$Term), 
+                     levels=rev(Hmisc::capitalize(go_up$Term)))
+
+go_down <- pcaExplorer::topGOtable(df %>%
+                                   filter(PC1 < (mean(PC1)-sd(PC1))) %>%
+                                   pull(Gene),
+                                  rownames(dds),
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+go_down$Term <- factor(Hmisc::capitalize(go_down$Term), 
+                     levels=rev(Hmisc::capitalize(go_down$Term)))
+```
+
+```{r}
+bluered <- rev(RColorBrewer::brewer.pal(9, "RdBu"))
+
+stose_go_up <- ggplot(go_up %>%
+                    top_n(-5, p.value_elim), 
+                  aes(x=-log10(p.value_elim), y=Term)) +
+  geom_bar(stat="identity", width = 0.01, color="black") +
+  geom_point(fill=bluered[8], shape=21, size=4, color="black") +
+  geom_vline(xintercept = -log10(0.05), linetype=2) +
+  xlab("-log10(padj)") + ylab("") + ggtitle("PC1 - Positive loading") +
+  theme_classic() +
+  theme(legend.position="none",
+        axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+
+stose_go_down <- ggplot(go_down %>%
+                    top_n(-5, p.value_elim), 
+                  aes(x=-log10(p.value_elim), y=Term)) +
+  geom_bar(stat="identity", width = 0.01, color="black") +
+  geom_point(fill=bluered[2], shape=21, size=4, color="black") +
+  geom_vline(xintercept = -log10(0.05), linetype=2) +
+  xlab("-log10(padj)") + ylab("") + ggtitle("PC1 - Negative loading") +
+  theme_classic() +
+  theme(legend.position="none",
+        axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+
+```
+
+## ID8
+```{r}
+dds_id8 <- dds[,c("BV-13", "BV-14", "BV-15",
+                  paste0("JP-", 1:6))]
+keep <- rowSums(counts(dds_id8)) >= 10
+dds_id8 <- dds_id8[keep,]
+dds_id8 <- dds_id8[which(rownames(dds_id8)!=""),]
+dds_id8$Model <- factor(dds_id8$Model)
+
+norm_counts <- vst(dds_id8, blind=FALSE) 
+```
+
+### PCA
+Top 2k variable genes only
+```{r}
+var_genes <- rownames(assay(norm_counts))[order(rowSds(assay(norm_counts)),
+                                        decreasing=T)[1:2000]]
+```
+
+```{r}
+pca_res <- prcomp(t(assay(norm_counts)[var_genes,]), scale=F, center=T) 
+```
+
+```{r}
+df <- data.frame(PC1 = pca_res$x[,1],
+                 PC2 = pca_res$x[,2],
+                 PC3 = pca_res$x[,3],
+                 PC4 = pca_res$x[,4],
+                 Model = norm_counts$Model,
+                 SampleID = norm_counts$SampleID)
+```
+
+```{r}
+df_summary <- df %>% group_by(Model) %>%
+  summarise_at(c("PC1", "PC2", "PC3", "PC4"), mean, na.rm = TRUE)
+```
+
+```{r}
+id8_pca_plot <- ggplot(df_summary, aes(x=PC1, y=PC2, label=Model)) +
+  geom_point(data=df, shape=16, size=3, aes(color=Model)) +
+  geom_point(shape=21,size=6, color="black", aes(fill=Model), alpha=0.5) +
+  geom_text_repel(max.overlaps=100, size=4,
+                  segment.size=0.25,
+                  min.segment.length = 0,
+                  force=3,
+                  direction = "both") +
+  ggtitle("ID8 Ascites lines") +
+  #scale_x_continuous(limits=c(-80, 80)) +
+  #scale_y_continuous(limits=c(-75, 40)) +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+```
+
+### PC1 Loadings
+```{r}
+loadings <- pca_res$rotation
+df <- data.frame(Gene = rownames(loadings),
+                 PC1 = loadings[,1])
+df <- arrange(df, desc(PC1))
+df$Rank <- 1:nrow(df)
+```
+
+```{r}
+up_labels <- c("Igfbp5", "Rspo1", "Gas6", "Wnt4", "Acta2", "Col5a2",
+               "Krt7", "Wnt9a", "Star", "Col3a1")
+down_labels <- c("Ptgs2", "Fabp5", "Bcat1" ,"Pgk1", "Ldha", 
+                 "Cyp26b1", "Lrp8")
+```
+
+```{r}
+df$Up_Label <- ""
+df$Up_Label[match(up_labels, df$Gene)] <- up_labels
+
+df$Down_Label <- ""
+df$Down_Label[match(down_labels, df$Gene)] <- down_labels
+```
+
+```{r}
+bluered <- rev(RColorBrewer::brewer.pal(9, "RdBu"))
+```
+
+```{r}
+id8_loading_plot <- ggplot(df, aes(x=Rank, y=PC1)) +
+  rasterise(geom_point(size=0.15, colour="grey13"), dpi=600) +
+  geom_text_repel(aes(label=Up_Label),
+                  max.overlaps = Inf,
+                  nudge_x =750,
+                  direction = "y",
+                  force=0.5, 
+                  color=bluered[8]) +
+  geom_text_repel(aes(label=Down_Label),
+                  max.overlaps = Inf,
+                  nudge_x = -750,
+                  direction = "y",
+                  force=0.5,
+                  color=bluered[2]) +
+  scale_x_continuous(limits=c(0,2000)) +
+  ylab("PC1 Loading") +
+  theme_classic() +
+  theme(axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+```
+
+### GO Terms of Top Loaded genes
+```{r}
+go_up <- pcaExplorer::topGOtable(df %>%
+                                   filter(PC1 > (mean(PC1)+sd(PC1))) %>%
+                                   pull(Gene),
+                                  rownames(dds),
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+go_up$Term <- factor(Hmisc::capitalize(go_up$Term), 
+                     levels=rev(Hmisc::capitalize(go_up$Term)))
+
+go_down <- pcaExplorer::topGOtable(df %>%
+                                   filter(PC1 < (mean(PC1)-sd(PC1))) %>%
+                                   pull(Gene),
+                                  rownames(dds),
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+go_down$Term <- factor(Hmisc::capitalize(go_down$Term), 
+                     levels=rev(Hmisc::capitalize(go_down$Term)))
+
+bluered <- rev(RColorBrewer::brewer.pal(9, "RdBu"))
+
+id8_go_up <- ggplot(go_up %>%
+                    top_n(-5, p.value_elim), 
+                  aes(x=-log10(p.value_elim), y=Term)) +
+  geom_bar(stat="identity", width = 0.01, color="black") +
+  geom_point(fill=bluered[8], shape=21, size=4, color="black") +
+  geom_vline(xintercept = -log10(0.05), linetype=2) +
+  xlab("-log10(padj)") + ylab("") + ggtitle("PC1 - Positive loading") +
+  theme_classic() +
+  theme(legend.position="none",
+        axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+
+id8_go_down <- ggplot(go_down %>%
+                    top_n(-5, p.value_elim), 
+                  aes(x=-log10(p.value_elim), y=Term)) +
+  geom_bar(stat="identity", width = 0.01, color="black") +
+  geom_point(fill=bluered[2], shape=21, size=4, color="black") +
+  geom_vline(xintercept = -log10(0.05), linetype=2) +
+  xlab("-log10(padj)") + ylab("") + ggtitle("PC1 - Negative loading") +
+  theme_classic() +
+  theme(legend.position="none",
+        axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+```
+
+## Plot
+```{r}
+id8_grid <- plot_grid(plot_grid(id8_pca_plot, id8_loading_plot,
+                                ncol=2, align="h", axis = "t"),
+                      plot_grid(id8_go_up, id8_go_down,ncol=1,
+                                align="v"), 
+                      ncol=1)
+
+stose_grid <- plot_grid(plot_grid(stose_pca_plot, stose_loading_plot,
+                                ncol=2, align="h", axis = "t"),
+                      plot_grid(stose_go_up, stose_go_down,ncol=1,
+                                align="v"), 
+                      ncol=1)
+
+all_grid <- plot_grid(id8_grid, stose_grid, ncol=2)
+save_plot(all_grid, filename="./ascites_pca_results.pdf",
+          base_width=13, base_height=7.5)
+```
+
+# session info
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,503 @@
+---
+title: "Figure 3"
+output: html_notebook
+---
+
+# Dependencies
+```{r}
+library(tidyverse)
+library(tximport)
+library(DESeq2)
+library(matrixStats)
+library(circlize)
+library(ComplexHeatmap)
+library(topGO)
+library(Hmisc)
+library(progeny)
+library(dorothea)
+library(viper)
+library(nichenetr)
+library(ggrepel)
+library(ggrastr)
+options(ggrastr.default.dpi=300)
+```
+
+# Load the data
+```{r}
+txi <- readRDS("../../output/txi_mouse.rds")
+tpm <- read.csv("../../output/tpm_matrix_mouse.csv", row.names=1)
+tpm <- log1p(as.matrix(tpm))
+tpm <- tpm[matrixStats::rowVars(tpm) != 0,]
+```
+
+```{r}
+annotations <- read.csv("../../data/mouse_sample_annotation_cleaned_model_name.csv")
+#annotations$Sample.code <- gsub("-", ".", annotations$Sample.code)
+
+rownames(annotations) <- annotations$Sample.code
+```
+
+## Cell Line DESeq setup
+```{r}
+cell_lines <- annotations %>% 
+  filter(Tissue.type == "cell line")
+```
+
+```{r}
+dds <- DESeqDataSetFromTximport(txi, annotations, ~Model)
+```
+
+```{r}
+dds <- dds[,cell_lines$Sample.code] # Only cell lines 
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- dds[which(rownames(dds)!=""),] # Remove unannotated gene entry in matrix
+```
+
+```{r}
+dds$Model <- factor(dds$Model)
+```
+
+# Figure 3a - Schematic
+
+# Figure 3b - MA Plot
+## STOSE vs. ID8 DGE
+```{r}
+dds$Model <- relevel(dds$Model, ref = "ID8") #Already set, but just to make sure
+```
+
+```{r}
+dds <- DESeq(dds)
+res <- lfcShrink(dds, coef="Model_STOSE_vs_ID8", type="apeglm")
+#res <- results(dds, contrast=c("Model", "STOSE", "ID8"))
+res <- as.data.frame(res)
+res$Gene <- rownames(res)
+```
+
+Let's just remove predicted genes to clean this up a bit
+```{r}
+gm <- grep("^Gm", res$Gene, value=T)
+rik <- grep("Rik", res$Gene, value=T)
+
+res <- filter(res, Gene %nin% c(gm, rik))
+```
+
+```{r}
+res %>% filter(padj <= 0.05 & abs(log2FoldChange) > 1) %>% nrow
+```
+
+```{r}
+# save a variable for later in the script
+dge_res <- res
+```
+
+
+## Plot
+```{r}
+dat <- res
+dat$Sig <- "ns"
+dat$Sig[dat$padj <= 0.05 & dat$log2FoldChange >= 1] <- "up"
+dat$Sig[dat$padj <= 0.05 & dat$log2FoldChange <= -1] <- "down"
+#dat$Sig <- ifelse(dat$padj <= 0.05 & abs(dat$log2FoldChange) >= 1,
+ #                 "Significant", "ns")
+
+dat$Label <- ""
+genes_label <- c("Aig1", "Col5a2", "Cyp1b1", "Gas6", "Krt8", "Twist1", 
+                    "Krt19", "Rspo1", "Ptgfr", "Bmp2", "Wnt2", "Sfrp1", 
+                    "Prickle2", "Itga1", "Grem1", "Pax7", "Epcam",
+                 "Mmp3", "Hoxa4", "Ccl7", "Lyz2", "Il18", "Il6", "Notch1", 
+                 "Cxcl1", "Foxa2", "Lefty1", "Flt1", "Star", "Smarca1")
+dat$Label[match(genes_label, rownames(dat))] <- genes_label
+
+volcano <- ggplot(dat, aes(x=log10(baseMean), y=log2FoldChange, label=Label)) +
+  geom_point_rast(size=0.5, alpha=0.35, shape=16, aes(color=Sig)) +
+  geom_text_repel(max.overlaps=Inf, size=3, segment.size=0.25,
+                  min.segment.length = 0, force=8, direction="both") +
+  #geom_hline(yintercept = -log10(0.05), linetype=2) + 
+  geom_hline(yintercept = c(-1,1), linetype=2) +
+  scale_y_continuous(limits=c(-18, 18)) +
+  scale_color_manual(values=c("#5BB381", "grey70", "#4A154B")) +
+  #scale_y_continuous(limits=c(0,200)) +
+  ggtitle("STOSE vs. ID8\n(5115 differentially expressed genes)") + 
+  ylab("log2FC") + xlab("log10(Mean counts)") +
+  theme_classic() +
+  theme(legend.position='none',
+        axis.text=element_text(size=12, color="black"),
+        axis.title=element_text(size=12))
+
+ggsave(volcano, filename="./volcano_stose_vs_id8.pdf",
+       width=4.25, height=3.5)
+```
+
+# Figure 3C - GO Terms
+
+```{r}
+go_up <- pcaExplorer::topGOtable(res %>%  
+                                   filter(padj < 0.05 & log2FoldChange > 1) %>%
+                                   pull(Gene),
+                                rownames(dds),
+                                ontology="BP",
+                                mapping="org.Mm.eg.db")
+
+go_down <- pcaExplorer::topGOtable(res %>%  
+                                   filter(padj < 0.05 & log2FoldChange < -1) %>%
+                                   pull(Gene),
+                                  rownames(dds),
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+```
+
+## Visualize
+```{r}
+up_labels <- c("extracellular matrix organization", 
+              "negative regulation of angiogenesis", 
+              "positive regulation of ERK1 and ERK2 cascade", 
+              "positive regulation of cell migration", 
+              "positive regulation of tumor necrosis factor production")
+
+df_up <- go_up %>%
+  filter(Term %in% up_labels)
+df_up$Term <- Hmisc::capitalize(df_up$Term)
+df_up$Term <- factor(df_up$Term, levels=rev(df_up$Term)) #already pval ordered
+```
+
+```{r}
+down_labels <- c("cholesterol biosynthetic process", 
+                 "cellular aldehyde metabolic process", 
+                 "glutathione metabolic process", 
+                 "oxidative phosphorylation", 
+                 "fatty acid transport")
+
+df_down <- go_down %>%
+  filter(Term %in% down_labels)
+df_down$Term <- Hmisc::capitalize(df_down$Term)
+df_down$Term <- factor(df_down$Term, levels=rev(df_down$Term))
+```
+
+```{r}
+bluered <- rev(RColorBrewer::brewer.pal(9, "RdBu"))
+
+p1 <- ggplot(df_up, aes(x=-log10(p.value_elim), y=Term)) +
+  geom_bar(stat="identity", width = 0.01, color="black") +
+  geom_point(fill="#4A154B", shape=21, size=4, color="black") +
+  geom_vline(xintercept = -log10(0.05), linetype=2) +
+  xlab("-log10(padj)") + ylab("") +
+  theme_classic() +
+  theme(legend.position="none",
+        axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+
+
+p2 <- ggplot(df_down, aes(x=-log10(p.value_elim), y=Term)) +
+  geom_bar(stat="identity", width = 0.01, color="black") +
+  geom_point(fill="#5BB381", shape=21, size=4, color="black") +
+  geom_vline(xintercept = -log10(0.05), linetype=2) +
+  xlab("-log10(padj)") + ylab("") +
+  theme_classic() +
+  theme(legend.position="none",
+        axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+```
+
+```{r}
+go_plot <- cowplot::plot_grid(p1, p2, ncol=1,
+                              align="vh")
+cowplot::save_plot(go_plot, filename="./GO_dge.pdf",
+          base_width=5.5, base_height=2.85)
+```
+
+# Fig 3d - PROGENy
+
+```{r}
+mat <- log1p(as.matrix(tpm))
+colnames(mat) <- annotations$SampleID
+mat <- mat[, c(1:3, 13:15)]
+
+pathways <- progeny(mat,
+                    organism="Mouse",
+                    top=500)
+
+```
+
+## Stats
+```{r}
+pathway_dat <- pathways %>%
+  as.data.frame() %>%
+  rownames_to_column(var="SampleID") %>%
+  pivot_longer(-SampleID,
+               names_to = "Pathway",
+               values_to = "Score")
+pathway_dat$Model <- substr(pathway_dat$SampleID, 1, nchar(pathway_dat$SampleID)-2)
+
+
+pathways <- unique(pathway_dat$Pathway)
+
+res <- list()
+for(i in 1:length(pathways)){
+  df <- pathway_dat %>% filter(Pathway == pathways[i])
+  model <- summary(lm(df$Score ~ df$Model))
+  res[[i]] <- data.frame(Pathway = pathways[i],
+                       Coef = coef(model)[2,1],
+                       pval = coef(model)[2,4])
+}
+res <- do.call("rbind", res)
+res$padj <- p.adjust(res$pval, method="fdr")
+
+res
+```
+```{r}
+sig_pathways <- res %>% filter(padj < 0.05) %>% pull(Pathway)
+```
+
+
+## Visualization
+```{r}
+pathway_plot <- ggplot(pathway_dat %>% filter(Pathway %in% sig_pathways), 
+                       aes(x=Model, y=Score)) +
+  geom_point(shape=21, color="black", size=3, alpha=0.75,
+             aes(fill=Model)) +
+  scale_fill_manual(values=c("#5BB381", "#4A154B")) +
+  xlab("") + ylab("Relative Activity (Z-score)") +
+  facet_wrap(~Pathway, ncol=6) +
+  theme_bw() +
+  theme(legend.position="none",
+        strip.background = element_blank(),
+        strip.text = element_text(size=12),
+        axis.text.x = element_text(size=10, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12))
+```
+
+```{r}
+ggsave(pathway_plot, filename="./progeny_plot.pdf",
+       width=5.25, height=3.5)
+```
+
+# Fig 3e - DoRothEA
+```{r}
+data(dorothea_mm, package="dorothea")
+```
+
+```{r}
+regulons <- dorothea_mm %>%
+  filter(confidence %in% c("A", "B"))
+```
+
+
+```{r}
+tf_activities <- run_viper(mat[,c(4:6, 1:3)], 
+                           regulons,
+                           tidy = T,
+                           options = list(method = "scale",
+                                          minsize = 5,
+                                          cores = 2,
+                                          verbose = TRUE))
+```
+
+```{r}
+tf_activities$Model <- substr(tf_activities$sample, 1, nchar(tf_activities$sample)-2)
+
+tfs <- unique(tf_activities$tf)
+
+res <- list()
+for(i in 1:length(tfs)){
+  df <- tf_activities %>% filter(tf == tfs[i])
+  model <- summary(lm(df$activity ~ df$Model))
+  res[[i]] <- data.frame(TF = tfs[i],
+                       Coef = coef(model)[2,1],
+                       pval = coef(model)[2,4])
+}
+res <- do.call("rbind", res)
+res$padj <- p.adjust(res$pval, method="fdr")
+
+sig_tfs <- res %>% filter(padj < 0.05) #%>% pull(TF)
+sig_tfs
+```
+
+## Plot
+```{r}
+tf_mat <- tf_activities %>%
+  filter(tf %in% sig_tfs$TF) %>%
+  dplyr::select(c(tf, sample, activity)) %>%
+  pivot_wider(names_from=sample, values_from = activity) %>%
+  column_to_rownames(var="tf")
+tf_mat <- as.matrix(tf_mat)
+``` 
+
+```{r}
+col_fun = colorRamp2(seq(-2, 2, length.out=100), 
+                     colorRampPalette(RColorBrewer::brewer.pal(9, "BuPu"))(100))
+```
+
+
+```{r}
+pdf("./dorothea_heatmap.pdf", width=3.5, height=4)
+Heatmap(tf_mat,
+        name="Relative TF\nactivity",
+        col = col_fun,
+        heatmap_legend_param = list(title_gp = gpar(fontsize = 10)),
+        cluster_rows = T,
+        cluster_columns = F,
+        show_row_dend = F,
+        clustering_method_rows = "ward.D2",
+        show_row_names = T,
+        column_names_rot = 45,
+        column_names_gp = gpar(fontsize = 10),
+        row_split=2,
+        border = FALSE,
+        rect_gp = gpar(col = "black", lwd = 1),
+        width = ncol(tf_mat)*unit(5, "mm"), 
+        height = nrow(tf_mat)*unit(5, "mm"),
+        use_raster=F)
+dev.off()
+```
+
+# Fig 3f - ECM/Cytokine MA plots
+```{r}
+res <- dge_res
+```
+
+```{r}
+cytokines <- fgsea::gmtPathways("~/Data/GeneLists/c2.CanonicalPathways.v7.5.1.symbols.gmt.txt")
+cytokines <- cytokines[["KEGG_CYTOKINE_CYTOKINE_RECEPTOR_INTERACTION"]]
+cytokines <- convert_human_to_mouse_symbols(cytokines)
+cytokines <- na.omit(cytokines)
+```
+
+```{r}
+cols <- RColorBrewer::brewer.pal(7, "Dark2")
+
+dat <- res
+dat$Cytokine <- ifelse(dat$Gene %in% cytokines, "Cytokine", "Other")
+
+dat$Label <- ""
+genes_label <- c("Ccr7", "Il3ra", "Il15", "Ccr4", "Cxcl5", 
+                 "Ccl7", "Il18", "Il6", "Ccl20", "Cxcl1", "Ccl2", "Cxcl10", 
+                 "Csf1", "Il1r1", "Il12a", "Tgfb1")
+dat$Label[match(genes_label, rownames(dat))] <- genes_label
+
+# SPlit non-cytokine from cytokine
+dat_other <- dat %>% filter(Cytokine=="Other")
+dat_cyto <- dat %>% filter(Cytokine=="Cytokine")
+
+cytokine_plot <- ggplot(dat_other, 
+                  aes(x=log10(baseMean), y=log2FoldChange, label=Label)) +
+  geom_point_rast(size=0.1, alpha=0.15, color="lightgrey", data=dat_other) +
+  geom_point_rast(shape=21, color="black", fill=cols[2], size=2,
+                  alpha=0.45, data=dat_cyto) +
+  geom_text_repel(data=dat_cyto, max.overlaps=100, size=3, segment.size=0.25,
+                  min.segment.length = 0, force=8, direction="both") +
+  geom_hline(yintercept = c(-1,1), linetype=2) +
+  #scale_y_continuous(limits=c(-18, 18)) +
+  #scale_y_continuous(limits=c(0,200)) +
+  ggtitle("Cytokines/Cytokine receptors") + ylab("log2FC") + 
+  xlab("log10(Mean counts)") +
+  theme_classic() +
+  theme(legend.position='none',
+        axis.text=element_text(size=12, color="black"),
+        axis.title=element_text(size=12))
+```
+
+## ECM components
+```{r}
+matrisome <- read.csv("~/Data/GeneLists/Matrisome/Human_Core_Matrisome.csv")
+matrisome <- matrisome %>%
+  dplyr::select(c(Gene.Symbol, Category))
+matrisome$Gene.Symbol <- nichenetr::convert_human_to_mouse_symbols(matrisome$Gene.Symbol)
+matrisome <- na.omit(matrisome)
+matrisome <- filter(matrisome, Gene.Symbol %in% res$Gene)
+```
+
+```{r}
+cols <- RColorBrewer::brewer.pal(7, "Set1")
+
+dat <- res
+dat <- left_join(dat, matrisome, by=c("Gene"="Gene.Symbol"))
+dat$Category[is.na(dat$Category)] <- "Other"
+
+dat$Label <- ""
+genes_label <- c("Fbln1", "Ogn", "Igfbp5",  "Col3a1", "Col6a3",
+                 "Col8a1",  "Col5a2", "Col1a1",
+                 "Fn1", "Postn", "Fbln2", "Col11a1", "Col17a1", "Vwf", 
+                 "Igfbp7", "Spp1", "Vcan", "Lamb3")
+dat$Label[match(genes_label, dat$Gene)] <- genes_label
+
+# SPlit ECM from non-ECM
+dat_other <- dat %>% filter(Category=="Other")
+dat_ecm <- dat %>% filter(Category != "Other")
+#dat_other$Category <- factor(dat_other$Category,
+#                             levels=c("Collagens", "ECM Glycoproteins",
+#                                      "Proteoglycans", "Other"))
+#dat_ecm$Category <- factor(dat_ecm$Category,
+#                             levels=c("Collagens", "ECM Glycoproteins",
+#                                      "Proteoglycans", "Other"))
+
+ecm_plot <- ggplot(dat_other, 
+                  aes(x=log10(baseMean), y=log2FoldChange, label=Label)) +
+  geom_point_rast(size=0.1, alpha=0.15, color="lightgrey", data=dat_other) +
+  geom_point_rast(shape=21, color="black", size=2,alpha=0.45, data=dat_ecm,
+                  aes(fill=Category)) +
+  geom_text_repel(data=dat_ecm, max.overlaps=100, size=3, segment.size=0.25,
+                  min.segment.length = 0, force=8, direction="both") +
+  geom_hline(yintercept = c(-1,1), linetype=2) +
+  scale_fill_manual(values=c(cols[1:3], "lightgrey"),
+                    name="Component") +
+  #scale_y_continuous(limits=c(-18, 18)) +
+  #scale_y_continuous(limits=c(0,200)) +
+  ggtitle("ECM Components") + ylab("log2FC") + 
+  xlab("log10(Mean counts)") +
+  theme_classic() +
+  theme(axis.text=element_text(size=12, color="black"),
+        axis.title=element_text(size=12),
+        legend.position="none")
+```
+
+```{r}
+ma_grid <- cowplot::plot_grid(ecm_plot, cytokine_plot,
+                   ncol=2, align="h")
+
+cowplot::save_plot(ma_grid, filename="./ecm_cytokine_ma.pdf",
+          base_width=6, base_height=3)
+```
+
+# Fig 3g - Macrophage prop
+```{r}
+cibersort <- read.csv("../../output/CIBERSORTx_mouseTumours_stose_id8_signature.csv")
+samples <- c("BV.34", "BV.35", "BV.36",
+             "BV.43", "BV.44", "BV.45")
+
+df <- cibersort %>%
+  filter(Mixture %in% samples) %>%
+  mutate(Model = c("STOSE", "STOSE", "STOSE", "ID8", "ID8", "ID8"))
+```
+
+```{r}
+df$Nonmalignant <- 1-df$Malignant
+df$CAF_prop <- df$Fibroblasts / df$Nonmalignant
+df$Macrophages_prop <- df$Macrophages / df$Nonmalignant
+```
+
+```{r}
+mac_plot <- ggplot(df, aes(x=Model, y=Macrophages_prop)) +
+  geom_jitter(shape=21, alpha=0.75, size=4, width=0.1,
+              color="black",aes(fill=Model)) +
+  scale_y_continuous(limits=c(0,1)) +
+  scale_fill_manual(values=c("#5BB381", "#4A154B")) +
+  ylab("Predicted macrophage\nproportion (% non-malignant)") + xlab("") + ggtitle("Inferred TAM\nfrequency") +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.text.y=element_text(size=10, color="black"),
+        axis.text.x=element_text(size=12, color="black"),
+        #axis.text.x=element_text(angle=45, hjust=1, 
+            #                     size=10, color="black"),
+        axis.title=element_text(size=12))
+
+ggsave(mac_plot, filename="./cibersort_macrophage_id8_stose.pdf",
+       width=2.15, height=3)
+```
+
+# Session info
+```{r}
+sessionInfo()
+```
+

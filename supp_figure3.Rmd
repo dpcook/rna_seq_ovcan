@@ -1,0 +1,66 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+```
+
+# Supp Fig 3
+Weights for ID8 IP experiments
+```{r}
+df <- data.frame(
+  Model = rep(c("ID8_p53_Nf1", "ID8_p53_Brca2", "ID8_p53_Pten", 
+                  "ID8_p53_Brca1","ID8_p53"), 
+            each=8),
+  Ascites = c(8.2, 8.5, 4.5, 5.5, 6.5, 8, 6.5, 4.2,
+              7.5, 10, 6, 6.5, 12, 4, 6, NA,
+              10, 10, 8, 8.5, 8.5, 8.5, 4.5, 10,
+              NA, 5, 4.5, NA, 5, 2, 5.5, 8,
+              NA, 11, 7, 8.5, 7, 9, 4, 8.5),
+  Burden = c(105, 126, 80, 140, 150, 118, 103, 87,
+             102, 210, 176, 284, 80, 85, 90, NA,
+             90, 84, 167, 185, 105, 88, 107, 92,
+             NA, 160, 280, NA, 135, 163, 120, 200,
+             NA, 195, 89, 134, 156, 106, 316, 180)
+)
+```
+
+
+```{r}
+burden_plot <- ggplot(df, aes(x=Model, y=Burden)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.7,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  xlab("") + ylab("Tumour mass (mg)") + ggtitle("Tumour burden") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+burden_plot
+```
+```{r}
+ascites_plot <- ggplot(df, aes(x=Model, y=Ascites)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.7,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  xlab("") + ylab("Volume (mL)") + ggtitle("Ascites") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+burden_plot
+```
+
+
+```{r}
+id8 <- cowplot::plot_grid(burden_plot, ascites_plot, ncol=2, align="vh")
+cowplot::save_plot(id8, filename="./id8_ip_metrics.pdf",
+                   base_width = 6, base_height = 3.25)
+```
+
+
+

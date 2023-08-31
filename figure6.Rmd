@@ -1,0 +1,322 @@
+---
+title: "Figure 5"
+output: html_notebook
+---
+
+# Dependencies
+```{r}
+library(tidyverse)
+library(Hmisc)
+library(tximport)
+library(DESeq2)
+library(matrixStats)
+library(topGO)
+library(ComplexHeatmap)
+library(circlize)
+library(ggrepel)
+library(ggrastr)
+options(ggrastr.default.dpi=300)
+```
+
+# Load the data
+```{r}
+txi <- readRDS("../../../output/txi_mouse.rds")
+tpm <- read.csv("../../../output/tpm_matrix_mouse.csv", row.names=1)
+tpm <- log1p(as.matrix(tpm))
+tpm <- tpm[matrixStats::rowVars(tpm) != 0,]
+```
+
+```{r}
+annotations <- read.csv("../../../data/mouse_sample_annotation_cleaned_model_name.csv")
+#annotations$Sample.code <- gsub("-", ".", annotations$Sample.code)
+
+rownames(annotations) <- annotations$Sample.code
+```
+
+## Cell Line DESeq setup
+```{r}
+cell_lines <- annotations %>% 
+  filter(Tissue.type == "cell line")
+```
+
+```{r}
+dds <- DESeqDataSetFromTximport(txi, annotations, ~Model)
+```
+
+```{r}
+dds <- dds[,cell_lines$Sample.code] # Only cell lines 
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- dds[which(rownames(dds)!=""),] # Remove unannotated gene entry in matrix
+```
+
+```{r}
+dds$Model <- factor(dds$Model)
+```
+
+# Figure 5a - Schematic
+
+# Figure 5b - PCA of ID8 mutant cell lines
+```{r}
+dds <- dds[,colnames(dds) %in% paste0("BV-", 16:33)]
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- dds[which(rownames(dds)!=""),]
+```
+
+```{r}
+dds$Model <- factor(dds$Model)
+```
+
+```{r}
+norm_counts <- vst(dds, blind=FALSE) # To get vst-transformed counts
+```
+
+top 2k variable genes
+```{r}
+var_genes <- rownames(assay(norm_counts))[order(rowSds(assay(norm_counts)),
+                                        decreasing=T)[1:2000]]
+```
+
+```{r}
+pca_res <- prcomp(t(assay(norm_counts)[var_genes,]), scale=F, center=T) 
+```
+
+```{r}
+df <- data.frame(PC1 = pca_res$x[,1],
+                 PC2 = pca_res$x[,2],
+                 Model = norm_counts$Model,
+                 SampleID = norm_counts$SampleID,
+                 PI = norm_counts$PI)
+```
+
+```{r}
+df_summary <- df %>% group_by(Model) %>%
+  summarise_at(c("PC1", "PC2"), mean, na.rm = TRUE)
+```
+
+```{r}
+id8_cell_pca <- ggplot(df_summary, aes(x=PC1, y=PC2, label=Model)) +
+  geom_point(data=df, shape=16, size=2, aes(color=Model)) +
+  geom_point(shape=21,size=6, color="black", aes(fill=Model), alpha=0.5) +
+  geom_text_repel(max.overlaps=100, size=4,
+                  segment.size=0.25,
+                  min.segment.length = 0,
+                  force=3,
+                  direction = "both") +
+  #scale_x_continuous(limits=c(-80, 80)) +
+  #scale_y_continuous(limits=c(-75, 40)) +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+```
+
+```{r}
+ggsave(id8_cell_pca, filename="./pca_id8_crispr_clones.pdf",
+       width=4, height=3) 
+```
+
+## GO Terms associated with PCs
+### PC1
+```{r}
+loadings <- pca_res$rotation
+df <- data.frame(Gene = rownames(loadings),
+                 PC1 = loadings[,1])
+df <- arrange(df, desc(PC1))
+df$Rank <- 1:nrow(df)
+```
+
+```{r}
+go_up <- pcaExplorer::topGOtable(df %>%
+                                   filter(PC1 > (mean(PC1)+sd(PC1))) %>%
+                                   pull(Gene),
+                                  rownames(dds),
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+go_up$Term <- factor(Hmisc::capitalize(go_up$Term), 
+                     levels=rev(Hmisc::capitalize(go_up$Term)))
+
+go_down <- pcaExplorer::topGOtable(df %>%
+                                   filter(PC1 < (mean(PC1)-sd(PC1))) %>%
+                                   pull(Gene),
+                                  rownames(dds),
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+go_down$Term <- factor(Hmisc::capitalize(go_down$Term), 
+                     levels=rev(Hmisc::capitalize(go_down$Term)))
+```
+
+### PC2
+```{r}
+loadings <- pca_res$rotation
+df <- data.frame(Gene = rownames(loadings),
+                 PC2 = loadings[,2])
+df <- arrange(df, desc(PC2))
+df$Rank <- 1:nrow(df)
+```
+
+```{r}
+go_up <- pcaExplorer::topGOtable(df %>%
+                                   filter(PC2 > (mean(PC2)+sd(PC2))) %>%
+                                   pull(Gene),
+                                  rownames(dds),
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+go_up$Term <- factor(Hmisc::capitalize(go_up$Term), 
+                     levels=rev(Hmisc::capitalize(go_up$Term)))
+
+go_down <- pcaExplorer::topGOtable(df %>%
+                                   filter(PC2 < (mean(PC2)-sd(PC2))) %>%
+                                   pull(Gene),
+                                  rownames(dds),
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+go_down$Term <- factor(Hmisc::capitalize(go_down$Term), 
+                     levels=rev(Hmisc::capitalize(go_down$Term)))
+```
+
+# Figure 5c - Heatmap of tumor DGE
+```{r}
+ip_tumors <- annotations %>% 
+  filter(Tissue.type == "IP tumour")
+```
+
+```{r}
+dds <- DESeqDataSetFromTximport(txi, annotations, ~Model)
+```
+
+```{r}
+dds <- dds[,ip_tumors$Sample.code]
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- dds[which(rownames(dds)!=""),]
+```
+
+```{r}
+dds$Model <- factor(dds$Model)
+```
+
+```{r}
+norm_counts <- vst(dds, blind=FALSE) 
+```
+
+## LRT DGE
+```{r}
+dds <- DESeq(dds, test="LRT", reduced=~1)
+```
+
+```{r}
+res <- results(dds)
+```
+
+A little clean-up
+```{r}
+df <- as.data.frame(res) %>%
+  rownames_to_column(var="Gene")
+
+gm <- grep("^Gm", df$Gene, value=T)
+rik <- grep("Rik", df$Gene, value=T)
+df <- filter(df, Gene %nin% c(gm, rik)) #Remove tail of lowly expressed genes. Seems reasonable based on histogram
+
+df$MeanVST <- rowMeans(assay(norm_counts)[df$Gene,])
+df$SD <- rowSds(assay(norm_counts)[df$Gene,])
+```
+
+```{r}
+hist(df$MeanVST, breaks=100)
+hist(df$SD, breaks=100)
+```
+
+```{r}
+df_sig <- df %>%
+  filter(padj < 0.05 &
+           SD > 0.5)
+```
+
+1544 sig genes
+
+### Average expression per model
+Calculate average per model
+```{r}
+dge_mat <- tpm[df_sig$Gene, gsub("-", ".", ip_tumors$Sample.code, fixed=T)]
+
+# Summarize by model average
+marker_mat <- dge_mat %>% 
+  as.data.frame %>%
+  rownames_to_column(var="Symbol") %>%
+  pivot_longer(-Symbol, names_to = "Sample.code", values_to="Expression")
+
+#Log transform expression before average
+marker_mat$Expression <- log1p(marker_mat$Expression)
+
+marker_mat$Sample.code <- gsub(".", "-", marker_mat$Sample.code, fixed=T)
+marker_mat$Model <- ip_tumors$Model[match(marker_mat$Sample.code, ip_tumors$Sample.code)]
+marker_mat <- marker_mat %>%
+  dplyr::group_by(Model, Symbol) %>%
+  dplyr::summarize(Avg_Exp = mean(Expression)) %>%
+  tidyr::pivot_wider(names_from = Model, values_from = Avg_Exp) %>%
+  column_to_rownames(var="Symbol") %>%
+  as.matrix()
+```
+
+```{r}
+marker_mat <- t(scale(t(marker_mat)))
+```
+
+### Plot
+```{r}
+col_fun = colorRamp2(seq(-2, 2, length.out=100), 
+                     colorRampPalette(rev(RColorBrewer::brewer.pal(9, "RdBu")))(100))
+```
+
+```{r}
+marker_heatmap <- Heatmap(marker_mat,
+        col = col_fun,
+        cluster_rows = T,
+        cluster_columns = T,
+        clustering_method_columns = "ward.D2",
+        clustering_method_rows = "ward.D2",
+        show_row_names = F,
+        show_row_dend = F,
+        show_column_dend = F,
+        show_column_names = T,
+        row_split=5,
+        #column_split = 5,
+        border = TRUE,
+        use_raster = T)
+
+```
+
+```{r}
+pdf("./id8_tumor_dge_heatmap.pdf", width=2.8, height=5.5)
+marker_heatmap <- draw(marker_heatmap)
+dev.off()
+```
+
+
+```{r}
+heatmap_rows <- row_order(marker_heatmap)
+gene_clusters <- lapply(heatmap_rows, function(x) rownames(marker_mat)[x])
+```
+
+### GO terms for each cluster
+```{r}
+getGo <- function(cluster){
+  print(paste0("Testing cluster ", cluster))
+  genes <- gene_clusters[[cluster]]
+  go <- pcaExplorer::topGOtable(genes,
+                                rownames(dds),
+                                ontology="BP",
+                                mapping="org.Mm.eg.db")
+  go$Term <- factor(Hmisc::capitalize(go$Term), 
+                    levels=rev(Hmisc::capitalize(go$Term)))
+  go$Cluster <- cluster
+  return(go)
+}
+  
+go_res <- lapply(1:5, 
+                 getGo)
+
+```
+

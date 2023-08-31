@@ -1,0 +1,212 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+```
+
+# Supp Figure 1A - qPCR validation
+## Acta2
+```{r}
+df <- read.delim("../../../data/qPCR_ddCT/Acta2 ID8 vs STOSE -ddCT.txt", sep="\t")
+df <- df %>%
+  mutate(Gene = "Acta2") %>%
+  pivot_longer(-Gene, names_to="Model", values_to = "Expression")
+df$Model <- factor(df$Model, levels=c("ID8", "STOSE"))
+```
+
+```{r}
+summary(lm(df$Expression ~ df$Model))
+```
+
+```{r}
+acta2_plot <- ggplot(df, aes(x=Model, y=Expression)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  scale_fill_manual(values=c("#5BB381",  "#4A154B")) +
+  xlab("") + ylab("Expression") + ggtitle("Acta2") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+```
+
+## Cxcl1
+```{r}
+df <- read.delim("../../../data/qPCR_ddCT/CXCL1 ID8 vs STOSE ddCT.txt", sep="\t")
+df <- df %>%
+  mutate(Gene = "Cxcl1") %>%
+  pivot_longer(-Gene, names_to="Model", values_to = "Expression")
+df$Model <- factor(df$Model, levels=c("ID8", "STOSE"))
+```
+
+```{r}
+summary(lm(df$Expression ~ df$Model))
+```
+
+```{r}
+cxcl1_plot <- ggplot(df, aes(x=Model, y=Expression)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  scale_fill_manual(values=c("#5BB381",  "#4A154B")) +
+  xlab("") + ylab("Expression") + ggtitle("Cxcl1") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+```
+
+
+## Il6
+```{r}
+df <- read.delim("../../../data/qPCR_ddCT/Il6 ID8 vs STOSE ddCT.txt", sep="\t")
+df <- df %>%
+  mutate(Gene = "Il6") %>%
+  pivot_longer(-Gene, names_to="Model", values_to = "Expression")
+df$Model <- factor(df$Model, levels=c("ID8", "STOSE"))
+```
+
+```{r}
+summary(lm(df$Expression ~ df$Model))
+```
+
+```{r}
+il6_plot <- ggplot(df, aes(x=Model, y=Expression)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  scale_fill_manual(values=c("#5BB381",  "#4A154B")) +
+  xlab("") + ylab("Expression") + ggtitle("Il6") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+```
+
+## Cdh1
+```{r}
+df <- read.delim("../../../data/qPCR_ddCT/Cdh1 ID8 vs STOSE -ddCT.txt", sep="\t")
+df <- df %>%
+  mutate(Gene = "Cdh1") %>%
+  pivot_longer(-Gene, names_to="Model", values_to = "Expression")
+df$Model <- factor(df$Model, levels=c("ID8", "STOSE"))
+```
+
+```{r}
+summary(lm(df$Expression ~ df$Model))
+```
+
+```{r}
+cdh1_plot <- ggplot(df, aes(x=Model, y=Expression)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  scale_fill_manual(values=c("#5BB381",  "#4A154B")) +
+  xlab("") + ylab("Expression") + ggtitle("Cdh1") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+```
+
+## Plots
+```{r}
+id8 <- cowplot::plot_grid(acta2_plot, cxcl1_plot, il6_plot, cdh1_plot, ncol=4,
+                          align="vh")
+
+cowplot::save_plot(id8, filename="./qpcr_validation.pdf",
+                   base_width = 5.5, base_height = 2.5)
+```
+
+# Supp Fig 1B - Western blot
+```{r}
+df <- data.frame(
+  Model = rep(c("ID8", "STOSE"), each=3),
+  ERK = c(26162.84, 15919.61, 15906.15, 25116.35, 20677.46, 17448.9),
+  ERK_housekeeping = c(18349.24, 17951.05, 16565, 9589.68, 15682.41, 17070.95),
+  pERK = c(2552.03, 7537.20, 3520.40, 17606.33, 15339.7, 9688.88),
+  pERK_housekeeping = c(26118.64, 25169.4, 16311.32, 20284.87, 25107.97, 11157.23)
+)
+```
+
+```{r}
+df$ERK_ratio <- df$ERK / df$ERK_housekeeping
+df$pERK_ratio <- df$pERK / df$pERK_housekeeping
+```
+
+```{r}
+df$pERK_rel <- df$pERK_ratio / df$ERK_ratio
+```
+
+## Plots
+```{r}
+perk_plot <- ggplot(df, aes(x=Model, y=pERK_ratio)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  scale_fill_manual(values=c("#5BB381",  "#4A154B")) +
+  xlab("") + ylab("Relative intensity") + ggtitle("pERK") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+```
+
+```{r}
+erk_plot <- ggplot(df, aes(x=Model, y=ERK_ratio)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  scale_fill_manual(values=c("#5BB381",  "#4A154B")) +
+  xlab("") + ylab("Relative intensity") + ggtitle("Total ERK") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+```
+
+```{r}
+perk_plot2 <- ggplot(df, aes(x=Model, y=pERK_rel)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  scale_fill_manual(values=c("#5BB381",  "#4A154B")) +
+  xlab("") + ylab("pERK / Total ERK") + ggtitle("Relative pERK") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+```
+
+```{r}
+perk <- cowplot::plot_grid(erk_plot, perk_plot, perk_plot2, ncol=3,
+                   align="vh")
+cowplot::save_plot(perk, filename="./perk_plots.pdf",
+                   base_width = 6, base_height=2.5)
+```
+
+## Stats
+```{r}
+summary(lm(df$ERK_ratio ~ df$Model))
+```
+
+```{r}
+summary(lm(df$pERK_ratio ~ df$Model))
+```
+
+```{r}
+summary(lm(df$pERK_rel ~ df$Model))
+```
+
+

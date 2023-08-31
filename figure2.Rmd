@@ -1,0 +1,421 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Dependencies
+```{r}
+library(tidyverse)
+library(tximport)
+library(DESeq2)
+library(matrixStats)
+library(circlize)
+library(ComplexHeatmap)
+library(singscore)
+library(nichenetr)
+library(topGO)
+library(ggrepel)
+library(ggrastr)
+options(ggrastr.default.dpi=300)
+```
+
+# Load the data
+```{r}
+txi <- readRDS("../../../output/txi_mouse.rds")
+tpm <- read.csv("../../../output/tpm_matrix_mouse.csv", row.names=1)
+tpm <- log1p(as.matrix(tpm))
+tpm <- tpm[matrixStats::rowVars(tpm) != 0,]
+```
+
+```{r}
+annotations <- read.csv("../../../data/mouse_sample_annotation_cleaned_model_name.csv")
+#annotations$Sample.code <- gsub("-", ".", annotations$Sample.code)
+
+rownames(annotations) <- annotations$Sample.code
+```
+
+## Cell Line DESeq setup
+```{r}
+cell_lines <- annotations %>% 
+  filter(Tissue.type == "cell line")
+```
+
+```{r}
+dds <- DESeqDataSetFromTximport(txi, annotations, ~Model)
+```
+
+```{r}
+dds <- dds[,cell_lines$Sample.code] # Only cell lines 
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- dds[which(rownames(dds)!=""),] # Remove unannotated gene entry in matrix
+```
+
+```{r}
+dds$Model <- factor(dds$Model)
+```
+
+```{r}
+norm_counts <- vst(dds, blind=FALSE) # To get vst-transformed counts
+```
+
+# Figure 2a - PCA of cell lines
+Top 2k variable genes only
+```{r}
+var_genes <- rownames(assay(norm_counts))[order(rowSds(assay(norm_counts)),
+                                        decreasing=T)[1:2000]]
+```
+
+```{r}
+pca_res <- prcomp(t(assay(norm_counts)[var_genes,]), scale=F, center=T)
+rownames(pca_res$x) <- norm_counts$SampleID
+```
+
+```{r}
+df <- data.frame(PC1 = pca_res$x[,1],
+                 PC2 = pca_res$x[,2],
+                 Model = norm_counts$Model,
+                 SampleID = norm_counts$SampleID,
+                 PI = norm_counts$PI)
+```
+
+```{r}
+df_summary <- df %>% group_by(Model) %>%
+  summarise_at(c("PC1", "PC2"), mean, na.rm = TRUE)
+```
+
+```{r}
+pca_plot <- ggplot(df_summary, aes(x=PC1, y=PC2, label=Model)) +
+  geom_point(data=df, shape=16, color="grey20") +
+  geom_point(shape=21,size=3, color="black", aes(fill=Model), alpha=0.5) +
+  geom_text_repel(max.overlaps=100, size=2.5,
+                  segment.size=0.25,
+                  min.segment.length = 0,
+                  #force=3,
+                  direction = "both") +
+  scale_x_continuous(limits=c(-90, 110)) +
+  scale_y_continuous(limits=c(-100, 60)) +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+ggsave(pca_plot, filename="./pca_cell_lines.pdf",
+       width=4, height=2.95) 
+```
+
+# Figure 2b - PC loadings
+```{r}
+loadings <- pca_res$rotation
+df <- data.frame(Gene = rownames(loadings),
+                 PC1 = loadings[,1])
+df <- arrange(df, desc(PC1))
+df$Rank <- 1:nrow(df)
+```
+
+```{r}
+up_labels <- c("Krt7", "Cd24a", "Pax8", "Pgr", "Pax2", "Greb1", "Itga2")
+down_labels <- c("Igfbp4", "Wnt10a", "Wnt6", "Cxcl12", "Aldh1a1", "Krt19", "Wt1", "Amhr2")
+```
+
+```{r}
+df$Up_Label <- ""
+df$Up_Label[match(up_labels, df$Gene)] <- up_labels
+
+df$Down_Label <- ""
+df$Down_Label[match(down_labels, df$Gene)] <- down_labels
+```
+
+```{r}
+bluered <- rev(RColorBrewer::brewer.pal(9, "RdBu"))
+```
+
+```{r}
+pc1_plot <- ggplot(df, aes(x=Rank, y=PC1)) +
+  rasterise(geom_point(size=0.15, colour="grey13"), dpi=600) +
+  geom_text_repel(aes(label=Up_Label),
+                  max.overlaps = Inf,
+                  size=3,
+                  nudge_x =750,
+                  direction = "y",
+                  force=0.5, 
+                  color="#F4B41A") +
+  geom_text_repel(aes(label=Down_Label),
+                  max.overlaps = Inf,
+                  size=3,
+                  nudge_x = -750,
+                  direction = "y",
+                  force=0.5,
+                  color="#143D59") +
+  scale_x_continuous(limits=c(0,2000)) +
+  ylab("PC1 Loading") +
+  theme_classic() +
+  theme(axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12)) 
+
+
+ggsave(pc1_plot, filename = "./pca_cell_lines_pc1_loadings.pdf",
+       width=2.25, height=3.25)
+```
+
+# Figure 2c - PC Loading GO
+```{r}
+pc1_loadings <- loadings[,1][order(dplyr::desc(loadings[,1]))]
+pc1_up <- names(head(pc1_loadings, n=200))
+pc1_down <- names(tail(pc1_loadings, n=200))
+```
+
+
+```{r}
+go_up <- pcaExplorer::topGOtable(pc1_up,
+                                rownames(norm_counts),
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+
+go_down <- pcaExplorer::topGOtable(pc1_down,
+                                  rownames(norm_counts),
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+```
+
+## Visualize
+```{r}
+up_labels <- c("metanephric nephron tubule development",
+               "angiogenesis", 
+               "cell-matrix adhesion", 
+               "positive regulation of epithelial cell differentiation", 
+               "regulation of ERK1 and ERK2 cascade")
+
+df_up <- go_up %>%
+  filter(Term %in% up_labels)
+df_up$Term <- Hmisc::capitalize(df_up$Term)
+df_up$Term <- factor(df_up$Term, levels=rev(df_up$Term)) #already pval ordered
+```
+
+```{r}
+down_labels <- c("collagen fibril organization", 
+                 "positive regulation of epithelial to mesenchymal transition",
+                 "extracellular matrix organization", 
+                 "actin-mediated cell contraction", 
+                 "negative regulation of cell population proliferation")
+
+df_down <- go_down %>%
+  filter(Term %in% down_labels)
+df_down$Term <- Hmisc::capitalize(df_down$Term)
+df_down$Term <- factor(df_down$Term, levels=rev(df_down$Term))
+```
+
+```{r}
+bluered <- rev(RColorBrewer::brewer.pal(9, "RdBu"))
+
+p1 <- ggplot(df_up, aes(x=-log10(p.value_elim), y=Term)) +
+  geom_bar(stat="identity", width = 0.01, color="black") +
+  geom_point(fill="#F4B41A", shape=21, size=4, color="black") +
+  geom_vline(xintercept = -log10(0.05), linetype=2) +
+  xlab("-log10(padj)") + ylab("") +
+  theme_classic() +
+  theme(legend.position="none",
+        axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+
+
+p2 <- ggplot(df_down, aes(x=-log10(p.value_elim), y=Term)) +
+  geom_bar(stat="identity", width = 0.01, color="black") +
+  geom_point(fill="#143D59", shape=21, size=4, color="black") +
+  geom_vline(xintercept = -log10(0.05), linetype=2) +
+  xlab("-log10(padj)") + ylab("") +
+  theme_classic() +
+  theme(legend.position="none",
+        axis.text=element_text(size=10, color="black"),
+        axis.title=element_text(size=12))
+```
+
+```{r}
+go_plot <- cowplot::plot_grid(p1, p2, ncol=1,
+                              align="vh")
+cowplot::save_plot(go_plot, filename="./GO_pc_loadings.pdf",
+          base_width=6.25, base_height=3)
+```
+
+# Figure 2d - Gene set scores
+```{r}
+score_matrix <- as.matrix(read.csv("../../output/geneset_score_matrix.csv",
+                                   row.names=1))
+pathway_summary <- as.matrix(read.csv('../../output/progeny_average.csv',
+                             row.names=1))
+```
+
+```{r}
+meta_pathway <- c("BMP Targets", "FGF Targets", "Hedgehog Targets", "Notch Targets",
+                  "RA Targets", "Wnt Targets", "YAP Targets", "MTORC1 Signalling",
+                  "Myc Signalling", "KRAS Signalling",
+                  "ROS Signalling")
+functions <- c("EMT", "MHC-Ia", "Chemoresistance", "Chemosensitivity", 
+               "PD-L1", "HRD", "Angiogenesis", "E2F Targets")
+metabolism <- c("Oxidative Phosphorylation", "Glycolysis",
+                "Cholesterol Metabolism")
+```
+
+```{r}
+# Order models to group OSE and OVE
+pathway_summary <- pathway_summary[,c(1:7, 21, 22, 17:20, 8:16)]
+score_matrix <- score_matrix[,c(1:7, 21, 22, 17:20, 8:16)]
+colnames(pathway_summary)
+```
+
+
+```{r}
+col_fun = colorRamp2(seq(-2, 2, length.out=100), 
+                     colorRampPalette(rev(RColorBrewer::brewer.pal(9, "RdBu")))(100))
+```
+
+```{r}
+h1 <- Heatmap(t(pathway_summary),
+        name="Relative\nactivity",
+        col = col_fun,
+        heatmap_legend_param = list(title_gp = gpar(fontsize = 14)),
+        cluster_columns = T,
+        cluster_rows = F,
+        show_column_dend = F,
+        clustering_method_rows = "ward.D2",
+        show_row_names = T,
+        column_names_rot = 45,
+        column_names_gp = gpar(fontsize = 13),
+        row_names_gp = gpar(fontsize = 13),
+        #row_split=11,
+        border = TRUE,
+        rect_gp = gpar(col = "white", lwd = 1),
+        width = ncol(t(pathway_summary))*unit(6, "mm"), 
+        height = nrow(t(pathway_summary))*unit(6, "mm"),
+        use_raster=T) 
+
+h2 <- Heatmap(t(score_matrix[meta_pathway,]),
+        name="Relative\nactivity",
+        col = col_fun,
+        heatmap_legend_param = list(title_gp = gpar(fontsize = 14)),
+        cluster_columns = T,
+        cluster_rows = F,
+        show_column_dend = F,
+        clustering_method_rows = "ward.D2",
+        show_row_names = T,
+        column_names_rot = 45,
+        column_names_gp = gpar(fontsize = 13),
+        row_names_gp = gpar(fontsize = 13),
+        #row_split=11,
+        border = TRUE,
+        rect_gp = gpar(col = "white", lwd = 1),
+        width = ncol(t(score_matrix[meta_pathway,]))*unit(6, "mm"), 
+        height = nrow(t(score_matrix[meta_pathway,]))*unit(6, "mm"),
+        use_raster=T) 
+
+h3 <- Heatmap(t(score_matrix[functions,]),
+        name="Relative\nactivity",
+        col = col_fun,
+        heatmap_legend_param = list(title_gp = gpar(fontsize = 14)),
+        cluster_columns = T,
+        cluster_rows = F,
+        show_column_dend = F,
+        clustering_method_rows = "ward.D2",
+        show_row_names = T,
+        column_names_rot = 45,
+        column_names_gp = gpar(fontsize = 13),
+        row_names_gp = gpar(fontsize = 13),
+        #row_split=11,
+        border = TRUE,
+        rect_gp = gpar(col = "white", lwd = 1),
+        width = ncol(t(score_matrix[functions,]))*unit(6, "mm"), 
+        height = nrow(t(score_matrix[functions,]))*unit(6, "mm"),
+        use_raster=T) 
+
+h4 <- Heatmap(t(score_matrix[metabolism,]),
+        name="Relative\nactivity",
+        col = col_fun,
+        heatmap_legend_param = list(title_gp = gpar(fontsize = 14)),
+        cluster_columns = T,
+        cluster_rows = F,
+        show_column_dend = F,
+        clustering_method_rows = "ward.D2",
+        show_row_names = T,
+        column_names_rot = 45,
+        column_names_gp = gpar(fontsize = 13),
+        row_names_gp = gpar(fontsize = 13),
+        #row_split=11,
+        border = TRUE,
+        rect_gp = gpar(col = "white", lwd = 1),
+        width = ncol(t(score_matrix[metabolism,]))*unit(6, "mm"), 
+        height = nrow(t(score_matrix[metabolism,]))*unit(6, "mm"),
+        use_raster=T) 
+
+ht_list <- h1 + h2 + h3 + h4
+```
+
+```{r}
+pdf(file = "./geneset_scoring.pdf", width=14, height=8)
+draw(ht_list)
+dev.off()
+```
+
+# Figure 2e - Survival / chemosensitivity
+```{r}
+#Chemoresistance in ovarian cancer
+# From Sun et al, Cell Death and Disease, 2019
+chemoresistance <- c("EDIL3", "GNG12", "MBOAT2", "MTMR6", "NBR1", "NEK7", 
+                     "NET1", "PPP3CA", "RAD17", "WDR41")
+chemoresistance <- as.character(na.omit(convert_human_to_mouse_symbols(chemoresistance)))
+
+chemosensitive <- c("FZD4", "MUTYH", "PCK2", "PEX10", "SRPK1", "UCP2")
+chemosensitive <- as.character(na.omit(convert_human_to_mouse_symbols(chemosensitive)))
+```
+
+```{r}
+tpm_ranked <- rankGenes(as.matrix(tpm))
+
+res <- simpleScore(tpm_ranked, upSet=chemosensitive)
+res$Sample <- annotations$Sample.code
+res$Model <- annotations$Model
+res$TissueType <- annotations$Tissue.type
+res <- filter(res, TissueType == "cell line")
+res$TotalScore <- scale(res$TotalScore, scale=TRUE, center=TRUE)
+
+res <- filter(res, Model %in% c("ID8_p53", "ID8_p53_BRCA2", "MOE_PTEN_p53"))
+```
+
+```{r}
+chem_plot <- ggplot(res, aes(x=Model, y=TotalScore)) +
+  geom_point(shape=21, color="black", size=4, fill="firebrick", alpha=0.75) +
+  stat_summary(fun=mean, geom="crossbar", width=0.5) +
+  ylab("Chemosensitivity\nsignature score") + xlab("") +
+  theme_classic() +
+  theme(axis.text.x =element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y=element_text(size=10, color="black"),
+        axis.title = element_text(size=12))
+```
+
+```{r}
+ggsave(chem_plot,
+       filename="./chemosensitivty_score.pdf", width=2.75, height=2.8)
+```
+
+```{r}
+summary(lm(res$TotalScore ~ res$Model))
+```
+
+
+
+# Session info
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

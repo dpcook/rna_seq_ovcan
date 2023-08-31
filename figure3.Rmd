@@ -1,0 +1,998 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(DESeq2)
+library(tximport)
+library(scales)
+library(topGO)
+library(progeny)
+library(matrixStats)
+library(Hmisc)
+library(UpSetR)
+library(ComplexHeatmap)
+library(circlize)
+library(ggrastr)
+library(tidyverse)
+options(ggrastr.default.dpi=300)
+```
+
+# Load the data
+```{r}
+txi <- readRDS("../../../output/txi_mouse.rds")
+tpm <- read.csv("../../../output/tpm_matrix_mouse.csv", row.names=1)
+```
+
+```{r}
+annotations <- read.csv("../../../data/mouse_sample_annotation_cleaned_model_name.csv")
+annotations <- dplyr::filter(annotations, Sample.code %nin% c("MK-2", "MK-9"))
+#annotations$Sample.code <- gsub("-", ".", annotations$Sample.code)
+
+rownames(annotations) <- annotations$Sample.code
+```
+
+# Figure 3A. PROGENy p53 scores
+```{r}
+cell_lines <- annotations %>% 
+  filter(Tissue.type == "cell line")
+cell_lines$Sample.code <- gsub("-", ".", cell_lines$Sample.code, fixed=T)
+
+cell_lines <- filter(cell_lines,
+                     Model %in% c("ID8_C3", "ID8_p53", 
+                                  "MOE_PTEN", "MOE_PTEN_p53",
+                                  "OVE4", "OVE4_p53", "OVE4_p53_mut",
+                                  "OVE16", "OVE16_p53_KO", "OVE16_p53_mut"))
+
+mat <- log1p(as.matrix(tpm))
+mat <- mat[,cell_lines$Sample.code]
+colnames(mat) <- cell_lines$SampleID
+
+
+pathways <- progeny(mat,
+                    organism="Mouse",
+                    top=500)
+p53_activity <- data.frame(
+  SampleID = rownames(pathways),
+  Model = cell_lines$Model,
+  Activity = pathways[,"p53"]
+)
+```
+
+## Plot: ID8-p53
+```{r}
+df <- p53_activity %>%
+  filter(Model %in% c("ID8_C3", "ID8_p53"))
+df$Model <- factor(df$Model, levels = c("ID8_C3", "ID8_p53"))
+
+norm_value <- df %>%
+  filter(Model %in% "ID8_C3") %>%
+  pull(Activity) %>% mean()
+#Normalize to average of control cells
+df$Activity <- df$Activity - norm_value
+
+p53_plot_id8 <- ggplot(df, aes(x=Model, y=Activity)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), alpha=0.75,
+                width=0.1) +
+  stat_summary(fun = "mean", geom = "crossbar", width=0.5) +
+  scale_fill_manual(values=c('lightgrey', "firebrick")) +
+    ylab("Inferred p53 activity") + xlab("") + ggtitle("ID8") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle=45, hjust=1, color="black", size=12),
+          axis.text.y = element_text(size=10, color="black"),
+          axis.title = element_text(size=12),
+          legend.position='none')
+
+#ggsave(p53_plot_id8, filename="./p53_activity_id8.pdf",
+#       width=1.6, height=2.75)
+```
+
+```{r}
+summary(lm(df$Activity ~ df$Model))
+```
+
+
+## Plot: MOE-PTEN-p53
+```{r}
+df <- p53_activity %>%
+  filter(Model %in% c("MOE_PTEN", "MOE_PTEN_p53"))
+df$Model <- factor(df$Model, levels = c("MOE_PTEN", "MOE_PTEN_p53"))
+
+norm_value <- df %>%
+  filter(Model %in% "MOE_PTEN") %>%
+  pull(Activity) %>% mean()
+#Normalize to average of control cells
+df$Activity <- df$Activity - norm_value
+
+p53_plot_MOE <- ggplot(df, aes(x=Model, y=Activity)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), alpha=0.75,
+                width=0.1) +
+  stat_summary(fun = "mean", geom = "crossbar", width=0.5) +
+  scale_fill_manual(values=c('lightgrey', "firebrick")) +
+    ylab("Inferred p53 activity") + xlab("") + ggtitle("MOE-PTEN") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle=45, hjust=1, color="black", size=12),
+          axis.text.y = element_text(size=10, color="black"),
+          axis.title = element_text(size=12),
+          legend.position='none')
+
+#ggsave(p53_plot_MOE, filename="../figs/p53_activity_moe_pten.pdf",
+    #   width=1.6, height=2.75)
+```
+
+```{r}
+summary(lm(df$Activity ~ df$Model))
+```
+
+## Plot: OVE4-p53
+```{r}
+df <- p53_activity %>%
+  filter(Model %in% c("OVE4", "OVE4_p53", "OVE4_p53_mut"))
+df$Model <- factor(df$Model, levels = c("OVE4", "OVE4_p53", "OVE4_p53_mut"))
+
+norm_value <- df %>%
+  filter(Model %in% "OVE4") %>%
+  pull(Activity) %>% mean()
+#Normalize to average of control cells
+df$Activity <- df$Activity - norm_value
+
+p53_plot_OVE4 <- ggplot(df, aes(x=Model, y=Activity)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), alpha=0.75,
+                width=0.1) +
+  stat_summary(fun = "mean", geom = "crossbar", width=0.5) +
+  scale_fill_manual(values=c('lightgrey', "firebrick", "steelblue")) +
+    ylab("Inferred p53 activity") + xlab("") + ggtitle("OVE4") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle=45, hjust=1, color="black", size=12),
+          axis.text.y = element_text(size=10, color="black"),
+          axis.title = element_text(size=12),
+          legend.position='none')
+
+#ggsave(p53_plot_OVE4, filename="../figs/p53_activity_ove4.pdf",
+  #     width=2, height=2.75)
+```
+
+```{r}
+summary(lm(df$Activity ~ df$Model))
+```
+
+## Plot: OVE16-p53
+```{r}
+df <- p53_activity %>%
+  filter(Model %in% c("OVE16", "OVE16_p53_KO", "OVE16_p53_mut"))
+df$Model <- factor(df$Model, levels = c("OVE16", "OVE16_p53_KO", "OVE16_p53_mut"))
+
+norm_value <- df %>%
+  filter(Model %in% "OVE16") %>%
+  pull(Activity) %>% mean()
+#Normalize to average of control cells
+df$Activity <- df$Activity - norm_value
+
+p53_plot_OVE16 <- ggplot(df, aes(x=Model, y=Activity)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), alpha=0.75,
+                width=0.1) +
+  stat_summary(fun = "mean", geom = "crossbar", width=0.5) +
+  scale_fill_manual(values=c('lightgrey', "firebrick", "steelblue")) +
+    ylab("Inferred p53 activity") + xlab("") + ggtitle("OVE16") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle=45, hjust=1, color="black", size=12),
+          axis.text.y = element_text(size=10, color="black"),
+          axis.title = element_text(size=12),
+          legend.position='none')
+
+#ggsave(p53_plot_OVE16, filename="../figs/p53_activity_ove16.pdf",
+#       width=2, height=2.75)
+```
+
+```{r}
+summary(lm(df$Activity ~ df$Model))
+```
+
+## Combined plot
+```{r}
+p53_plots <- cowplot::plot_grid(p53_plot_id8, p53_plot_OVE16,
+                                p53_plot_MOE, p53_plot_OVE4,
+                                rel_widths = c(0.8, 1),
+                                ncol = 2, align='vh')
+cowplot::save_plot(p53_plots, filename="./p53_activity_plots.pdf",
+                   base_width = 3.85, base_height=6)
+```
+
+
+# ID8 p53 KO
+```{r}
+cell_lines <- annotations %>% 
+  filter(Tissue.type == "cell line")
+id8_lines <- cell_lines %>%
+  filter(Model %in% c("ID8_C3", "ID8_p53"))
+```
+
+```{r}
+dds <- DESeqDataSetFromTximport(txi, annotations, ~Model)
+```
+
+```{r}
+dds <- dds[,id8_lines$Sample.code]
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- dds[which(rownames(dds)!=""),]
+```
+
+```{r}
+dds$Model <- factor(dds$Model)
+dds_id8 <- dds #saving for next section
+```
+
+```{r}
+norm_counts <- vst(dds, blind=FALSE) # To get vst-transformed counts
+```
+
+```{r}
+dds <- DESeq(dds)
+res <- lfcShrink(dds, coef="Model_ID8_p53_vs_ID8_C3", type="ashr")
+res <- as.data.frame(res)
+res$Gene <- rownames(res)
+```
+
+```{r}
+res %>% filter(padj <= 0.05 & abs(log2FoldChange) > 1) %>% nrow
+```
+
+Let's just remove predicted genes to clean this up a bit
+```{r}
+gm <- grep("^Gm", res$Gene, value=T)
+rik <- grep("Rik", res$Gene, value=T)
+
+res <- filter(res, Gene %nin% c(gm, rik))
+res_id8 <- res
+```
+
+GOAL: Compare (ID8-p53 - ID8-C3) vs. (OVE-p53 - OVE). Does P53 have a common effect?
+
+
+# OVE4 - Null and R175H in one model
+```{r}
+cell_lines <- annotations %>% 
+  filter(Tissue.type == "cell line")
+ove4_lines <- cell_lines %>%
+  filter(Model %in% c("OVE4_p53", "OVE4_p53_mut", "OVE4"))
+```
+
+```{r}
+dds <- DESeqDataSetFromTximport(txi, annotations, ~Model)
+```
+
+```{r}
+dds <- dds[,ove4_lines$Sample.code]
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- dds[which(rownames(dds)!=""),]
+```
+
+```{r}
+dds$Model <- factor(dds$Model)
+dds_ove4 <- dds #saving for next section
+```
+
+```{r}
+norm_counts <- vst(dds, blind=FALSE) # To get vst-transformed counts
+```
+
+```{r}
+dds <- DESeq(dds)
+```
+
+### KO
+```{r}
+res <- lfcShrink(dds, contrast=c("Model", "OVE4_p53", "OVE4"), 
+                 type="ashr")
+res <- as.data.frame(res)
+res$Gene <- rownames(res)
+```
+
+```{r}
+res %>% filter(padj <= 0.05 & abs(log2FoldChange) > 1) %>% nrow
+```
+
+Let's just remove predicted genes to clean this up a bit
+```{r}
+gm <- grep("^Gm", res$Gene, value=T)
+rik <- grep("Rik", res$Gene, value=T)
+
+res <- filter(res, Gene %nin% c(gm, rik))
+res_ove4_ko <- res
+```
+
+```{r}
+go_down_ove4_ko <- pcaExplorer::topGOtable(res_ove4_ko %>% 
+                                        filter(log2FoldChange <= -1 &
+                                                 padj <= 0.05) %>% 
+                                          arrange(log2FoldChange) %>%
+                                        pull(Gene),
+                                        res_ove4_ko$Gene, 
+                                        ontology="BP",
+                                        mapping="org.Mm.eg.db")
+
+go_up_ove4_ko <- pcaExplorer::topGOtable(res_ove4_ko %>% 
+                                        filter(log2FoldChange >= 1 &
+                                                 padj <= 0.05) %>% 
+                                          arrange(desc(log2FoldChange)) %>%
+                                        pull(Gene),
+                                        res_ove4_ko$Gene, 
+                                        ontology="BP",
+                                        mapping="org.Mm.eg.db")
+```
+
+
+### R175H
+```{r}
+res <- lfcShrink(dds, contrast=c("Model", "OVE4_p53_mut", "OVE4_p53"), 
+                 type="ashr")
+res <- as.data.frame(res)
+res$Gene <- rownames(res)
+```
+
+```{r}
+res %>% filter(padj <= 0.05 & abs(log2FoldChange) > 1) %>% nrow
+```
+
+Let's just remove predicted genes to clean this up a bit
+```{r}
+gm <- grep("^Gm", res$Gene, value=T)
+rik <- grep("Rik", res$Gene, value=T)
+
+res <- filter(res, Gene %nin% c(gm, rik))
+res_ove4_mut <- res
+```
+
+### Compare
+```{r}
+df_ove4 <- data.frame(
+  Gene = res_ove4_ko$Gene, #confirmed order matches
+  log2FC_KO = res_ove4_ko$log2FoldChange,
+  log2FC_Mut = res_ove4_mut$log2FoldChange
+)
+df_ove4$difference <- df_ove4$log2FC_Mut - df_ove4$log2FC_KO
+df_ove4$diff_thresh <- ifelse(abs(df_ove4$difference) > 2, "Diff", "NotDiff")
+```
+
+```{r}
+cor_plot <- ggplot(df_ove4, aes(x=log2FC_KO, y=log2FC_Mut)) +
+  geom_point(shape=16, size=1, aes(color=difference)) +
+  scale_color_gradientn(colours=rev(RColorBrewer::brewer.pal(8, "RdBu")),
+                        limits=c(-5, 5),
+                        oob = squish) +
+  theme_bw()
+cor_plot
+```
+
+### GO term enrichment
+```{r}
+go_ove4_mut_recover_up <- pcaExplorer::topGOtable(df_ove4 %>% 
+                                        filter(log2FC_KO <= -1 &
+                                                 log2FC_Mut >= 1) %>% 
+                                          arrange(desc(log2FC_Mut)) %>%
+                                        pull(Gene),
+                                        df_ove4$Gene, 
+                                        ontology="BP",
+                                        mapping="org.Mm.eg.db")
+
+go_ove4_mut_recover_failed <- pcaExplorer::topGOtable(df_ove4 %>% 
+                                        filter(log2FC_KO <= -1 &
+                                                 abs(log2FC_Mut) < 1) %>% 
+                                          arrange(log2FC_KO) %>%
+                                        pull(Gene),
+                                        df_ove4$Gene, 
+                                        ontology="BP",
+                                        mapping="org.Mm.eg.db")
+
+go_ove4_mut_recover_down <- pcaExplorer::topGOtable(df_ove4 %>% 
+                                        filter(log2FC_KO > 1 &
+                                                 log2FC_Mut <= -1) %>% 
+                                          arrange(log2FC_Mut) %>%
+                                        pull(Gene),
+                                        df_ove4$Gene, 
+                                        ontology="BP",
+                                        mapping="org.Mm.eg.db")
+```
+
+# OVE16 - Null and R175H in one model
+```{r}
+cell_lines <- annotations %>% 
+  filter(Tissue.type == "cell line")
+ove16_lines <- cell_lines %>%
+  filter(Model %in% c("OVE16_p53_mut", "OVE16_p53_KO", "OVE16"))
+```
+
+```{r}
+dds <- DESeqDataSetFromTximport(txi, annotations, ~Model)
+```
+
+```{r}
+dds <- dds[,ove16_lines$Sample.code]
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- dds[which(rownames(dds)!=""),]
+```
+
+```{r}
+dds$Model <- factor(dds$Model)
+dds_ove16 <- dds #saving for next section
+```
+
+```{r}
+norm_counts <- vst(dds, blind=FALSE) # To get vst-transformed counts
+```
+
+```{r}
+dds <- DESeq(dds)
+```
+
+### KO
+```{r}
+res <- lfcShrink(dds, contrast=c("Model", "OVE16_p53_KO", "OVE16"), 
+                 type="ashr")
+res <- as.data.frame(res)
+res$Gene <- rownames(res)
+```
+
+```{r}
+res %>% filter(padj <= 0.05 & abs(log2FoldChange) > 1) %>% nrow
+```
+
+Let's just remove predicted genes to clean this up a bit
+```{r}
+gm <- grep("^Gm", res$Gene, value=T)
+rik <- grep("Rik", res$Gene, value=T)
+
+res <- filter(res, Gene %nin% c(gm, rik))
+res_ove16_ko <- res
+```
+
+```{r}
+go_down_ove16_ko <- pcaExplorer::topGOtable(res_ove16_ko %>% 
+                                        filter(log2FoldChange <= -1 &
+                                                 padj <= 0.05) %>% 
+                                          arrange(log2FoldChange) %>%
+                                        pull(Gene),
+                                        res_ove16_ko$Gene, 
+                                        ontology="BP",
+                                        mapping="org.Mm.eg.db")
+
+go_up_ove16_ko <- pcaExplorer::topGOtable(res_ove16_ko %>% 
+                                        filter(log2FoldChange >= 1 &
+                                                 padj <= 0.05) %>% 
+                                          arrange(desc(log2FoldChange)) %>%
+                                        pull(Gene),
+                                        res_ove16_ko$Gene, 
+                                        ontology="BP",
+                                        mapping="org.Mm.eg.db")
+```
+
+### R175H
+```{r}
+res <- lfcShrink(dds, contrast=c("Model", "OVE16_p53_mut", "OVE16_p53_KO"), 
+                 type="ashr")
+res <- as.data.frame(res)
+res$Gene <- rownames(res)
+```
+
+```{r}
+res %>% filter(padj <= 0.05 & abs(log2FoldChange) > 1) %>% nrow
+```
+
+Let's just remove predicted genes to clean this up a bit
+```{r}
+gm <- grep("^Gm", res$Gene, value=T)
+rik <- grep("Rik", res$Gene, value=T)
+
+res <- filter(res, Gene %nin% c(gm, rik))
+res_ove16_mut <- res
+```
+
+### Compare
+```{r}
+df_ove16 <- data.frame(
+  Gene = res_ove16_ko$Gene, #confirmed order matches
+  log2FC_KO = res_ove16_ko$log2FoldChange,
+  log2FC_Mut = res_ove16_mut$log2FoldChange
+)
+df_ove16$difference <- df_ove16$log2FC_Mut - df_ove16$log2FC_KO
+df_ove16$diff_thresh <- ifelse(abs(df_ove16$difference) > 2, "Diff", "NotDiff")
+```
+
+```{r}
+cor_plot <- ggplot(df_ove16, aes(x=log2FC_KO, y=log2FC_Mut)) +
+  geom_point(shape=16, size=1, aes(color=difference)) +
+  scale_color_gradientn(colours=rev(RColorBrewer::brewer.pal(8, "RdBu")),
+                        limits=c(-5, 5),
+                        oob = squish) +
+  theme_bw()
+cor_plot
+```
+
+### GO term enrichment
+```{r}
+go_ove16_mut_recover_up <- pcaExplorer::topGOtable(df_ove16 %>% 
+                                        filter(log2FC_KO <= -1 &
+                                                 log2FC_Mut >= 1) %>% 
+                                          arrange(desc(log2FC_Mut)) %>%
+                                        pull(Gene),
+                                        df_ove16$Gene, 
+                                        ontology="BP",
+                                        mapping="org.Mm.eg.db")
+
+go_ove16_mut_recover_failed <- pcaExplorer::topGOtable(df_ove16 %>% 
+                                        filter(log2FC_KO <= -1 &
+                                                 abs(log2FC_Mut) < 1) %>% 
+                                          arrange(log2FC_KO) %>%
+                                        pull(Gene),
+                                        df_ove16$Gene, 
+                                        ontology="BP",
+                                        mapping="org.Mm.eg.db")
+
+go_ove16_mut_novel_up <- pcaExplorer::topGOtable(df_ove16 %>% 
+                                        filter(abs(log2FC_KO) < 1 &
+                                                 log2FC_Mut > 1) %>% 
+                                          arrange(desc(log2FC_Mut)) %>%
+                                        pull(Gene),
+                                        df_ove16$Gene, 
+                                        ontology="BP",
+                                        mapping="org.Mm.eg.db")
+
+go_ove16_mut_recover_down <- pcaExplorer::topGOtable(df_ove16 %>% 
+                                        filter(log2FC_KO > 1 &
+                                                 log2FC_Mut <= -1) %>% 
+                                          arrange(log2FC_Mut) %>% 
+                                        pull(Gene),
+                                        df_ove16$Gene, 
+                                        ontology="BP",
+                                        mapping="org.Mm.eg.db")
+```
+
+# Compare OVE KO
+```{r}
+common_genes <- intersect(res_ove4_ko$Gene, res_ove16_ko$Gene)
+df_combined <- data.frame(
+  Gene = common_genes,
+  logFC_ove4 = res_ove4_ko$log2FoldChange[match(common_genes, res_ove4_ko$Gene)],
+  logFC_ove16 = res_ove16_ko$log2FoldChange[match(common_genes, res_ove16_ko$Gene)]
+)
+```
+
+
+```{r}
+comparison_plot <- ggplot(df_combined, aes(x=logFC_ove4, y=logFC_ove16)) +
+  geom_point(shape=16, size=1) +
+  geom_vline(xintercept = c(-1, 1), linetype=2) +
+  geom_hline(yintercept = c(-1, 1), linetype=2) +
+  theme_bw()
+comparison_plot
+```
+
+### Genes in both
+```{r}
+common_down_KO <- df_combined$Gene[df_combined$logFC_ove4 < -1 & 
+                                     df_combined$logFC_ove16 < -1]
+common_down_KO <- df_combined %>%
+  filter(logFC_ove4 < -1 & logFC_ove16 < -1) %>%
+  mutate(combined = logFC_ove16 * logFC_ove4) %>%
+  arrange(desc(combined)) %>%
+  pull(Gene)
+
+common_up_KO <- df_combined$Gene[df_combined$logFC_ove4 > 1 & 
+                                     df_combined$logFC_ove16 > 1]
+
+common_up_KO <- df_combined %>%
+  filter(logFC_ove4 > 1 & logFC_ove16 > 1) %>%
+  mutate(combined = logFC_ove16 * logFC_ove4) %>%
+  arrange(desc(combined)) %>%
+  pull(Gene)
+```
+
+```{r}
+common_down_KO_GO <- pcaExplorer::topGOtable(common_down_KO,
+                                df_combined$Gene,
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+
+common_up_KO_GO <- pcaExplorer::topGOtable(common_up_KO,
+                                df_combined$Gene,
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+```
+
+
+# Compare OVE Mutants
+```{r}
+common_genes <- intersect(df_ove4$Gene, df_ove16$Gene)
+df_combined <- data.frame(
+  Gene = common_genes,
+  logFC_ove4 = df_ove4$log2FC_Mut[match(common_genes, df_ove4$Gene)],
+  logFC_ove16 = df_ove16$log2FC_Mut[match(common_genes, df_ove16$Gene)]
+)
+```
+
+
+```{r}
+comparison_plot <- ggplot(df_combined, aes(x=logFC_ove4, y=logFC_ove16)) +
+  geom_point(shape=16, size=1) +
+  geom_vline(xintercept = c(-1, 1), linetype=2) +
+  geom_hline(yintercept = c(-1, 1), linetype=2) +
+  theme_bw()
+comparison_plot
+```
+
+### Genes in both
+```{r}
+common_down_mut <- df_combined$Gene[df_combined$logFC_ove4 < -1 & 
+                                     df_combined$logFC_ove16 < -1]
+
+common_up_mut <- df_combined$Gene[df_combined$logFC_ove4 > 1 & 
+                                     df_combined$logFC_ove16 > 1]
+```
+
+```{r}
+common_down_mut_GO <- pcaExplorer::topGOtable(common_down_KO,
+                                df_combined$Gene,
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+
+common_up_mut_GO <- pcaExplorer::topGOtable(common_up_KO,
+                                df_combined$Gene,
+                                  ontology="BP",
+                                  mapping="org.Mm.eg.db")
+```
+
+
+
+
+
+
+# MOE-Pten-p53 R273H
+```{r}
+cell_lines <- annotations %>% 
+  filter(Tissue.type == "cell line")
+moe_lines <- cell_lines %>%
+  filter(Model %in% c("MOE_PTEN", "MOE_PTEN_p53"))
+```
+
+```{r}
+dds <- DESeqDataSetFromTximport(txi, annotations, ~Model)
+```
+
+```{r}
+dds <- dds[,moe_lines$Sample.code]
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- dds[which(rownames(dds)!=""),]
+```
+
+```{r}
+dds$Model <- factor(dds$Model)
+dds_ove16 <- dds #saving for next section
+```
+
+```{r}
+norm_counts <- vst(dds, blind=FALSE) # To get vst-transformed counts
+```
+
+```{r}
+dds <- DESeq(dds)
+res <- lfcShrink(dds, coef="Model_MOE_PTEN_p53_vs_MOE_PTEN", type="ashr")
+res <- as.data.frame(res)
+res$Gene <- rownames(res)
+```
+
+```{r}
+res %>% filter(padj <= 0.05 & abs(log2FoldChange) > 1) %>% nrow
+```
+
+Let's just remove predicted genes to clean this up a bit
+```{r}
+gm <- grep("^Gm", res$Gene, value=T)
+rik <- grep("Rik", res$Gene, value=T)
+
+res <- filter(res, Gene %nin% c(gm, rik))
+res_moe_p53 <- res
+```
+
+# Figure 3B. Jaccard
+```{r}
+all_sig_up <- list(
+  ID8_KO_Up = res_id8 %>% 
+    filter(padj < 0.05 & log2FoldChange > 1) %>% 
+    arrange(desc(log2FoldChange)) %>%
+    pull(Gene),
+  OVE16_KO_Up = res_ove16_ko %>% 
+    filter(padj < 0.05 & log2FoldChange > 1) %>% 
+    arrange(desc(log2FoldChange)) %>%
+    pull(Gene),
+  OVE4_KO_Up = res_ove4_ko %>% 
+    filter(padj < 0.05 & log2FoldChange > 1) %>% 
+    arrange(desc(log2FoldChange)) %>%
+    pull(Gene)
+)
+
+all_sig_down <- list(
+  ID8_KO_Down = res_id8 %>% 
+    filter(padj < 0.05 & log2FoldChange < -1) %>% 
+    arrange(log2FoldChange) %>% 
+    pull(Gene),
+  OVE16_KO_Down = res_ove16_ko %>% 
+    filter(padj < 0.05 & log2FoldChange < -1) %>% 
+    arrange(log2FoldChange) %>% 
+    pull(Gene),
+  OVE4_KO_Down = res_ove4_ko  %>% 
+    filter(padj < 0.05 & log2FoldChange < -1) %>% 
+    arrange(log2FoldChange) %>%  
+    pull(Gene)
+)
+```
+
+
+```{r}
+jaccard <- function(a, b, res_list) {
+    intersection = length(intersect(res_list[[a]], res_list[[b]]))
+    union = min(length(res_list[[a]]), length(res_list[[b]])) #overlap coefficient due to differing sizes
+   # union = length(a) + length(b) - intersection
+    return (intersection/union)
+}
+```
+
+```{r}
+all_changes <- c(all_sig_up, all_sig_down)
+all_names <- names(all_changes)
+
+res <- list()
+for(i in 1:length(all_names)){
+  res[[i]] <- lapply(all_names, jaccard, b=all_names[i], res_list=all_changes)
+  res[[i]] <- unlist(res[i])
+}
+
+res <- do.call('rbind', res)
+colnames(res) <- all_names
+rownames(res) <- all_names
+```
+```{r}
+col_fun = colorRamp2(seq(0, 0.4, length.out=100), 
+                     colorRampPalette(RColorBrewer::brewer.pal(9, "BuPu"))(100))
+```
+
+
+```{r}
+pdf("./p53_ko_overlap.pdf", width=3.75, height=2.25)
+Heatmap(res,
+        name="Overlap\ncoefficient",
+        col = col_fun,
+        heatmap_legend_param = list(title_gp = gpar(fontsize = 10)),
+        cluster_rows = T,
+        cluster_columns = T,
+        show_row_dend = F,
+        #clustering_method_rows = "ward.D2",
+        show_row_names = T,
+        show_column_names = F,
+        row_names_side = "left",
+        #column_names_rot = 45,
+       # column_names_gp = gpar(fontsize = 10),
+        border = FALSE,
+        rect_gp = gpar(col = "black", lwd = 1),
+        width = ncol(res)*unit(5, "mm"), 
+        height = nrow(res)*unit(5, "mm"),
+        use_raster=F)
+dev.off()
+```
+
+
+
+# Figure 3C - Line frequency
+```{r}
+gene_count_up <- fromList(all_sig_up)
+rownames(gene_count_up) <- unique(unlist(all_sig_up)) #tested
+gene_count_up <- data.frame(Gene = rownames(gene_count_up),
+                            Count = rowSums(gene_count_up))
+gene_count_up <- gene_count_up %>%
+  
+  arrange(desc(Count)) %>%
+  mutate(Rank = 1:nrow(gene_count_up))
+
+gene_count_down <- fromList(all_sig_down)
+rownames(gene_count_down) <- unique(unlist(all_sig_down)) #tested
+gene_count_down <- data.frame(Gene = rownames(gene_count_down),
+                            Count = rowSums(gene_count_down))
+gene_count_down <- gene_count_down %>%
+  
+  arrange(desc(Count)) %>%
+  mutate(Rank = 1:nrow(gene_count_down))
+```
+
+
+```{r}
+bluered <- rev(RColorBrewer::brewer.pal(9, "RdBu"))
+```
+
+```{r}
+count_plot_up <- ggplot(gene_count_up, aes(x=Rank, y=Count)) +
+  geom_point(shape=16, size=2, color=bluered[9]) +
+  ggtitle("Upregulated genes in\np53-null lines") +
+  scale_y_continuous(breaks=c(1, 2, 3)) +
+  xlab("") + ylab("Number of models") +
+  theme_classic() +
+  theme(axis.text = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        plot.margin = margin(10, 15, 10, 10))
+
+ggsave(count_plot_up, filename = "./p53_upregulation_count.pdf",
+       width=2.95, height=2)
+
+count_plot_down <- ggplot(gene_count_down, aes(x=Rank, y=Count)) +
+  geom_point(shape=16, size=2, color=bluered[1]) +
+  ggtitle("Downregulated genes in\np53-null lines") +
+  scale_y_continuous(breaks=c(1, 2, 3)) +
+  xlab("") + ylab("Number of models") +
+  theme_classic() +
+  theme(axis.text = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        plot.margin = margin(10, 15, 10, 10))
+
+ggsave(count_plot_down, filename = "./p53_downregulation_count.pdf",
+       width=2.95, height=2)
+
+
+##Plot together
+line_count <- cowplot::plot_grid(count_plot_up, count_plot_down,
+                                 ncol=2, align="v")
+cowplot::save_plot(line_count, filename="./recurrent_dge.pdf",
+                   base_width=5, base_height = 2)
+```
+
+#Figure 3D - Expression
+```{r}
+tpm_mat <- as.matrix(tpm)
+anno <- annotations
+anno$Sample.code <- gsub("-", ".", anno$Sample.code, fixed=T)
+anno <- filter(anno, Tissue.type == "cell line")
+```
+
+```{r}
+plotExp <- function(models, gene, colors){
+  df <- anno %>% filter(Model %in% models)
+  df$Models <- factor(df$Model, levels=models)
+  exp <- data.frame(
+    Exp = as.numeric(log2(tpm[gene, df$Sample.code] +1)),
+    Model = df$Model,
+    SampleID = df$SampleID
+  )
+  
+  exp_plot <- ggplot(exp, aes(x=Model, y=Exp)) +
+    geom_jitter(shape=21, size=3, color="black", aes(fill=Model), alpha=0.75,
+                width=0.1) +
+    stat_summary(fun = "mean", geom = "crossbar", width=0.5) +
+    #Color specifically for these 
+    scale_fill_manual(values=colors) +
+    ylab("log2(TPM+1)") + xlab("") + ggtitle(gene) +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle=45, hjust=1, color="black", size=12),
+          axis.text.y = element_text(size=10, color="black"),
+          axis.title = element_text(size=12),
+          legend.position='none')
+ # ggsave(exp_plot,
+  #       filename=paste0("./expression_", gene, ".pdf"),
+  #       width=3, height=2.75)
+  return(exp_plot)
+}
+```
+
+```{r}
+models <- c("OVE4", "OVE4_p53", "OVE16", "OVE16_p53_KO", "ID8_C3", "ID8_p53")
+colors <- RColorBrewer::brewer.pal(6, "Paired")
+```
+
+
+```{r}
+p1 <- plotExp(models=models, gene="Map1a", colors=colors)
+p2 <- plotExp(models=models, gene="Prr5l", colors=colors)
+p3 <- plotExp(models=models, gene="Rcn3", colors=colors)
+
+#Downregulated
+p4 <- plotExp(models=models, gene="Ngf", colors=colors)
+p5 <- plotExp(models=models, gene="Cdkn1a", colors=colors)
+#plotExp(models=models, gene="Itgb6", colors=colors)
+#plotExp(models=models, gene="Cxcl17", colors=colors)
+p6 <- plotExp(models=models, gene="Areg", colors=colors)
+```
+
+```{r}
+exp_grid <- cowplot::plot_grid(p1, p2, p3,
+                   p4, p5, p6,
+                   ncol=3,
+                   align="vh")
+cowplot::save_plot(exp_grid,
+                   filename="./p53_recurrent_genes.pdf",
+                   base_width = 8, base_height = 5.5)
+```
+
+# Figure 3E - OVE4 R175H recovery
+```{r}
+df_ove4 <- data.frame(
+  Gene = res_ove4_ko$Gene, #confirmed order matches
+  log2FC_KO = res_ove4_ko$log2FoldChange,
+  log2FC_Mut = res_ove4_mut$log2FoldChange
+)
+
+df_ove4$Group <- "None"
+df_ove4$Group[df_ove4$log2FC_KO <= -1 &
+                df_ove4$log2FC_Mut > 1] <- "Recovered (Up)"
+df_ove4$Group[df_ove4$log2FC_KO <= -1 &
+                abs(df_ove4$log2FC_Mut) < 1] <- "Not recovered"
+df_ove4$Group[df_ove4$log2FC_KO >= 1 &
+                df_ove4$log2FC_Mut <= -1] <- "Recovered (Down)"
+```
+
+```{r}
+table(df_ove4$Group)
+```
+
+
+```{r}
+set1 <- RColorBrewer::brewer.pal(9, "Set1")
+set1 <- alpha(set1, 0.75)
+cor_plot <- ggplot(df_ove4, aes(x=log2FC_KO, y=log2FC_Mut)) +
+  geom_point_rast(shape=16, size=1, aes(color=Group)) +
+  geom_vline(xintercept = c(-1, 1), linetype=2) + 
+  geom_hline(yintercept = c(-1, 1), linetype=2) +
+  xlab("log2FC (p53 KO vs. WT)") + ylab("log2FC (R175H vs. KO)") +
+  ggtitle("OVE4") +
+  scale_color_manual(values=c("lightgrey", set1[3], set1[2], set1[1])) +
+  theme_bw() +
+  theme(legend.position="None",
+        axis.text = element_text(size=10, color="black"),
+        axis.title = element_text(size=12))
+cor_plot
+ggsave(cor_plot, filename="./OVE4_Mut_vs_KO.pdf",
+       width=3, height=2.8)
+```
+
+# Figure 3E - OVE4 R175H recovery
+```{r}
+df_ove16 <- data.frame(
+  Gene = res_ove16_ko$Gene, #confirmed order matches
+  log2FC_KO = res_ove16_ko$log2FoldChange,
+  log2FC_Mut = res_ove16_mut$log2FoldChange
+)
+
+df_ove16$Group <- "None"
+df_ove16$Group[df_ove16$log2FC_KO <= -1 &
+                df_ove16$log2FC_Mut > 1] <- "Recovered (Up)"
+df_ove16$Group[abs(df_ove16$log2FC_KO) <= 1 &
+                df_ove16$log2FC_Mut > 1] <- "Novel (Up)"
+df_ove16$Group[df_ove16$log2FC_KO <= -1 &
+                abs(df_ove16$log2FC_Mut) < 1] <- "Not recovered"
+df_ove16$Group[df_ove16$log2FC_KO >= 1 &
+                df_ove16$log2FC_Mut <= -1] <- "Recovered (Down)"
+```
+
+```{r}
+table(df_ove16$Group)
+```
+
+
+```{r}
+set1 <- RColorBrewer::brewer.pal(9, "Set1")
+set1 <- alpha(set1, 0.75)
+cor_plot <- ggplot(df_ove16, aes(x=log2FC_KO, y=log2FC_Mut)) +
+  geom_point_rast(shape=16, size=1, aes(color=Group)) +
+  geom_vline(xintercept = c(-1, 1), linetype=2) + 
+  geom_hline(yintercept = c(-1, 1), linetype=2) +
+  xlab("log2FC (p53 KO vs. WT)") + ylab("log2FC (R175H vs. KO)") +
+  ggtitle("OVE16") +
+  scale_color_manual(values=c("lightgrey", set1[3], set1[5], set1[2], set1[1])) +
+  theme_bw() +
+  theme(legend.position="None",
+        axis.text = element_text(size=10, color="black"),
+        axis.title = element_text(size=12))
+cor_plot
+ggsave(cor_plot, filename="./OVE16_Mut_vs_KO.pdf",
+       width=3, height=2.8)
+```

@@ -1,0 +1,212 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+```
+
+# Supp Fig 2A - qPCR validation
+## Col1a2
+```{r}
+df <- read.delim("../../../data/qPCR_ddCT/Col1a2 STOSE vs A -ddCT.txt", sep="\t")
+colnames(df) <- c("STOSE", "STOSE-A2", "STOSE-A3", "STOSE-A4")
+df <- df %>%
+  mutate(Gene = "Col1a2") %>%
+  pivot_longer(-Gene, names_to="Model", values_to = "Expression")
+```
+
+```{r}
+summary(lm(df$Expression ~ df$Model))
+```
+
+```{r}
+col1a2_plot <- ggplot(df, aes(x=Model, y=Expression)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  xlab("") + ylab("Expression") + ggtitle("Col1a2") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+```
+
+## Col8a1
+```{r}
+df <- read.delim("../../../data/qPCR_ddCT/Col8a1 STOSE vs A -ddCT.txt", sep="\t")
+colnames(df) <- c("STOSE", "STOSE-A2", "STOSE-A3", "STOSE-A4")
+df <- df %>%
+  mutate(Gene = "Col8a1") %>%
+  pivot_longer(-Gene, names_to="Model", values_to = "Expression")
+```
+
+```{r}
+summary(lm(df$Expression ~ df$Model))
+```
+
+```{r}
+col8a1_plot <- ggplot(df, aes(x=Model, y=Expression)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  xlab("") + ylab("Expression") + ggtitle("Col8a1") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+```
+
+## Cxcl12
+```{r}
+df <- read.delim("../../../data/qPCR_ddCT/CXCL12 STOSE vs A -ddCT.txt", sep="\t")
+colnames(df) <- c("STOSE", "STOSE-A2", "STOSE-A3", "STOSE-A4")
+df <- df %>%
+  mutate(Gene = "Cxcl12") %>%
+  pivot_longer(-Gene, names_to="Model", values_to = "Expression")
+```
+
+```{r}
+summary(lm(df$Expression ~ df$Model))
+```
+
+```{r}
+cxcl12_plot <- ggplot(df, aes(x=Model, y=Expression)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  xlab("") + ylab("Expression") + ggtitle("Cxcl12") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+```
+
+## ID8 - Acta2
+```{r}
+df <- read.delim("../../../data/qPCR_ddCT/Acta2 ID8 vs 28-2 -ddCT.txt", sep="\t")
+colnames(df) <- c("ID8", "28-2")
+df <- df %>%
+  mutate(Gene = "Acta2") %>%
+  pivot_longer(-Gene, names_to="Model", values_to = "Expression")
+df$Model <- factor(df$Model, levels=c("ID8", "28-2"))
+```
+
+```{r}
+summary(lm(df$Expression ~ df$Model))
+```
+
+```{r}
+acta2_plot <- ggplot(df, aes(x=Model, y=Expression)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  xlab("") + ylab("Expression") + ggtitle("Acta2") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+```
+
+## ID8 - Ptgs2
+```{r}
+df <- read.delim("../../../data/qPCR_ddCT/Ptgs2 ID8 vs 28-2 -ddCT.txt", sep="\t")
+colnames(df) <- c("ID8", "28-2")
+df <- df %>%
+  mutate(Gene = "Ptgs2") %>%
+  pivot_longer(-Gene, names_to="Model", values_to = "Expression")
+df$Model <- factor(df$Model, levels=c("ID8", "28-2"))
+```
+
+```{r}
+summary(lm(df$Expression ~ df$Model))
+```
+
+
+```{r}
+ptgs2_plot <- ggplot(df, aes(x=Model, y=Expression)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  xlab("") + ylab("Expression") + ggtitle("Ptgs2") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+```
+
+## Plots
+```{r}
+id8 <- cowplot::plot_grid(acta2_plot, ptgs2_plot, col1a2_plot, col8a1_plot,
+                          cxcl12_plot, ncol=5,
+                          align="vh",
+                          rel_widths = c(0.77, 0.77, 1, 1, 1))
+
+cowplot::save_plot(id8, filename="./qpcr_validation.pdf",
+                   base_width = 8, base_height = 3)
+```
+
+
+# Supp Fig 2B - STOSE ascites models
+## Ascites volume
+```{r}
+df <- data.frame(
+  Model = c("STOSE-A2", "STOSE-A2", "STOSE-A3", "STOSE-A3", "STOSE-A3",
+            "STOSE-A4", "STOSE-A4", "STOSE-A4"),
+  Volume = c(3, 6, 5.5, 7, 7, 7, 7, 5)
+)
+```
+
+```{r}
+vol_plot <- ggplot(df, aes(x=Model, y=Volume)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  xlab("") + ylab("Volume (mL)") + ggtitle("Ascites volume") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+vol_plot
+```
+
+
+## Tumor burden
+```{r}
+df <- data.frame(
+  Model = c("STOSE-A2", "STOSE-A2", "STOSE-A3", "STOSE-A3", "STOSE-A3",
+            "STOSE-A4", "STOSE-A4", "STOSE-A4"),
+  Burden = c(2.13, 2.43, 0.87, 1.12, 1.03, 1.43, 0.89, 0.61)
+)
+```
+
+```{r}
+burden_plot <- ggplot(df, aes(x=Model, y=Burden)) +
+  geom_jitter(shape=21, size=3, color="black", aes(fill=Model), width=0.1,
+              alpha=0.75,) +
+  stat_summary(fun = mean, geom="crossbar", width=0.5) +
+  xlab("") + ylab("Tumour mass (g)") + ggtitle("Tumour burden") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=12, color="black", angle=45, hjust=1),
+        axis.text.y = element_text(size=10, color="black"),
+        axis.title = element_text(size=12),
+        legend.position='none')
+burden_plot
+```
+
+```{r}
+measurements <- cowplot::plot_grid(burden_plot, vol_plot, ncol=2,
+                                   align="vh")
+cowplot::save_plot(measurements,
+                   filename="./stose_model_measurements.pdf", 
+                   base_width=3.5, base_height = 3)
+```
+
+
